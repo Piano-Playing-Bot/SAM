@@ -1,3 +1,8 @@
+// Utility for simple, good Graphical User Interfaces in Raylib
+//
+// Define GUI_IMPLEMENTATION in one file
+// Define GUI_MALLOC, GUI_FREE to overwrite default malloc and free functions
+
 #ifndef GUI_H_
 #define GUI_H_
 
@@ -5,6 +10,19 @@
 
 #include "util.h"
 #include "raylib.h"
+#include <string.h>
+#include <stdbool.h>
+#include <float.h>
+#include "stb_ds.h"
+
+#ifndef GUI_MALLOC
+#include <stdlib.h>
+#define GUI_MALLOC malloc
+#endif
+#ifndef GUI_FREE
+#include <stdlib.h>
+#define GUI_FREE free
+#endif
 
 typedef enum __attribute__((__packed__)) {
     EL_STATE_HIDDEN,   // Element is not displayed
@@ -105,11 +123,8 @@ Gui_Update_Res gui_drawInputBox(Gui_Input_Box *self);
 
 
 #ifdef GUI_IMPLEMENTATION
-
-#include <string.h>
-#include <stdbool.h>
-#include <float.h>
-#include "stb_ds.h"
+#ifndef _GUI_IMPL_GUARD_
+#define _GUI_IMPL_GUARD_
 
 // Static Variables
 static i16   Input_Box_anim_len  = 50;   // Length of animation in ms
@@ -292,7 +307,7 @@ void gui_drawPreparedText(Gui_Drawable_Text text, Gui_El_Style style)
         if ((cp != '\n') && (cp != ' ') && (cp != '\t') && (cp != '\r')) {
             DrawTextCodepoint(style.font, cp, pos, style.font_size, style.color);
         }
-        if (UNLIKELY(lineIdx < stbds_arrlen(text.lineOffsets) && i == lastOffset + (i32)text.lineOffsets[lineIdx])) {
+        if (UTIL_UNLIKELY(lineIdx < stbds_arrlen(text.lineOffsets) && i == lastOffset + (i32)text.lineOffsets[lineIdx])) {
             pos.y += style.font_size + style.lSpacing;
             pos.x  = text.lineXs[xIdx];
             xIdx++;
@@ -325,7 +340,7 @@ Vector2* gui_drawSizedEx(Gui_Drawable_Text text, Rectangle bounds, Gui_El_Style 
     DrawRectangle(bounds.x, bounds.y, bounds.width, bounds.height, style.bg);
 
     if (!text.text) return NULL;
-    Vector2 *res = malloc(text.text_len * sizeof(Vector3));
+    Vector2 *res = GUI_MALLOC(text.text_len * sizeof(Vector3));
     float scaleFactor = style.font_size/style.font.baseSize; // Character quad scaling factor
     Vector2 pos = { .x = text.lineOffsets[0], .y = text.y }; // Position to draw current codepoint at
     i32 lastOffset = 0;
@@ -645,10 +660,11 @@ Gui_Update_Res gui_drawInputBox(Gui_Input_Box *self)
         if (self->anim_idx >= Input_Box_anim_len) self->anim_idx = 0;
     }
 
-    free(coords);
+    GUI_FREE(coords);
     if (hovered) SetMouseCursor(MOUSE_CURSOR_IBEAM);
     res.state = state;
     return res;
 }
 
+#endif // _GUI_IMPL_GUARD_
 #endif // GUI_IMPLEMENTATION
