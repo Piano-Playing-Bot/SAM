@@ -3,6 +3,6 @@ if ./build.sh; then
 	if $1 -eq "r"; then
 		rm -rf ./data
 	fi
-	gdb ./rl
+	gdb ./main
 	cd ..
 fi

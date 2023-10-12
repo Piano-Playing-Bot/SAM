@@ -7,6 +7,6 @@ if %errorLevel%==0 (
 	if "%~1"=="r" (
 		del /Q data
 	)
-	call gdb rl.exe
+	call gdb main.exe
 	popd ..
 )

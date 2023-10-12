@@ -22,7 +22,7 @@ if [[ $1 -eq "a" ]] || [ -d "./bin" ]; then
 	gcc -o bin/raygui.dll deps/raygui/src/raygui.c -shared -DRAYGUI_IMPLEMENTATION -DBUILD_LIBTYPE_SHARED -static-libgcc -Wl,--out-implib,bin/librayguidll.a $RAYLIB_DEP $INCLUDES $LIB_PATHS
 fi
 
-if [ -f "./bin/rl" ]; then
-	rm -f "./bin/rl"
+if [ -f "./bin/main" ]; then
+	rm -f "./bin/main"
 fi
-gcc $CFLAGS $DEV_FLAGS -o bin/rl src/main.c $DEPS
+gcc $CFLAGS $DEV_FLAGS -o bin/main src/main.c $DEPS
