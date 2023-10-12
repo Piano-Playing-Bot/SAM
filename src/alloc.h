@@ -9,7 +9,10 @@
 #define _ALLOC_H_
 
 #include <stdint.h>
-#include "util.h"   // For macros
+
+#define ALLOC_UNLIKELY(expr) __builtin_expect(!!(expr), 0)
+#define ALLOC_LIKELY(expr)   __builtin_expect(!!(expr), 1)
+#define ALLOC_MAX(a, b)      (((a) > (b)) ? (a) : (b))
 
 typedef struct {
 	void *data;
@@ -17,12 +20,14 @@ typedef struct {
 	void *(*realloc)(void*, void*, size_t);
     void  (*free)(void*, void*);
     void  (*freeAll)(void*);
-} Alloc_Ctx_Allocator;
+} Alloc_Allocator;
 
 // @TODO: This allocator isn't really an arena -> need another name
 typedef struct {
 	size_t cap;
 	size_t idx;
+	void  *next;
+	Alloc_Allocator allocator;
 } Alloc_Arena_Header;
 
 typedef size_t Alloc_Arena_El_Header;
@@ -30,17 +35,19 @@ typedef size_t Alloc_Arena_El_Header;
 void *alloc_ctxAlloc(size_t size);
 void *alloc_ctxCalloc(size_t nelem, size_t elsize);
 void *alloc_ctxRealloc(void *ptr, size_t size);
-void  alloc_ctxFree(void *ptr);
-void  alloc_ctxFreeAll();
+void alloc_ctxFree(void *ptr);
+void alloc_ctxFreeAll();
 void *alloc_stdAlloc(void *data, size_t size);
-void  alloc_stdFree(void *data, void *ptr);
-void  alloc_stdFreeAll(void *data);
-void *alloc_arenaAllocPerm(void *data, size_t size);
-void *alloc_arenaAllocTmp(void *data, size_t size);
-void  alloc_arenaFree(void *data, void *ptr);
-void  alloc_arenaFreeAll(void *data);
+void *alloc_stdRealloc(void *data, void *ptr, size_t size);
+void alloc_stdFree(void *data, void *ptr);
+void alloc_stdFreeAll(void *data);
+void *alloc_arenaNextBlock(Alloc_Allocator allocator, size_t size, bool growable);
+void *alloc_arenaAlloc(void *data, size_t size);
+void *alloc_arenaRealloc(void *data, void *ptr, size_t size);
+void alloc_arenaFree(void *data, void *ptr);
+void alloc_arenaFreeAll(void *data);
 
-static Alloc_Ctx_Allocator alloc_std = {
+static Alloc_Allocator alloc_std = {
 	.data    = NULL,
 	.alloc   = alloc_stdAlloc,
 	.realloc = alloc_stdRealloc,
@@ -48,9 +55,9 @@ static Alloc_Ctx_Allocator alloc_std = {
 	.freeAll = alloc_stdFreeAll,
 };
 
-static Alloc_Ctx_Allocator *alloc_ctx = &alloc_std;
-static Alloc_Ctx_Allocator *_alloc_prev_ctx_ = NULL;
-#define ALLOC_SWITCH_CTX(allocator) { _alloc_prev_ctx_ = alloc_ctx; alloc_ctx = (allocator); }
+static Alloc_Allocator *alloc_ctx = &alloc_std;
+static Alloc_Allocator *_alloc_prev_ctx_ = NULL;
+#define ALLOC_SWITCH_CTX(allocator) { _alloc_prev_ctx_ = alloc_ctx; alloc_ctx = &(allocator); }
 #define ALLOC_SWITCH_BACK_CTX() alloc_ctx = _alloc_prev_ctx_
 #define ALLOC_GET_HEADER(strct, data) ((strct *)(((char *)(data))-sizeof(strct)))
 
@@ -62,6 +69,7 @@ static Alloc_Ctx_Allocator *_alloc_prev_ctx_ = NULL;
 #define _ALLOC_IMPL_GUARD_
 
 #include <stdlib.h> // For std_allocator
+
 
 /////////////
 // Context //
@@ -125,19 +133,10 @@ void alloc_stdFreeAll(void *data)
 // Arena //
 ///////////
 
-// @Note: Uses current context as backing allocator
-// @Note: This allocator stores two buffers - one permament, that is never freed - and one temporary, that is only freed on freeAll
-// @Note: Calling free is a no-op
-// @Note: The two buffers grow towards each other (like stack & heap)
-Alloc_Ctx_Allocator alloc_arenaInit(Alloc_Ctx_Allocator allocator, size_t initialSize)
+Alloc_Allocator alloc_arenaInit(Alloc_Allocator allocator, size_t initialSize, bool growable)
 {
-	void *data = allocator.alloc(allocator.data, sizeof(Alloc_Arena_Header) + initialSize);
-	*((Alloc_Arena_Header *)data) = (Alloc_Arena_Header) {
-		.cap  = initialSize,
-		.idx  = 0,
-	};
-	return (Alloc_Ctx_Allocator) {
-		.data    = data + sizeof(Alloc_Arena_Header),
+	return (Alloc_Allocator) {
+		.data    = alloc_arenaNextBlock(allocator, initialSize, growable),
 		.alloc   = alloc_arenaAlloc,
 		.realloc = alloc_arenaRealloc,
 		.free    = alloc_arenaFree,
@@ -145,14 +144,31 @@ Alloc_Ctx_Allocator alloc_arenaInit(Alloc_Ctx_Allocator allocator, size_t initia
 	};
 }
 
-// @TODO: We could avoid returning NULL, by making the arena into a linked-list
-// We would need to add at least two fields to the header then:
-// 1. A pointer at the backing allocator from alloc_arenaInit
-// 2. A pointer to the next Arena buffer
+void *alloc_arenaNextBlock(Alloc_Allocator allocator, size_t size, bool growable)
+{
+	void *data = allocator.alloc(allocator.data, sizeof(Alloc_Arena_Header) + size);
+	*((Alloc_Arena_Header *)data) = (Alloc_Arena_Header) {
+		.cap  = size,
+		.idx  = 0,
+		.next = NULL,
+		.allocator = growable ? allocator : (Alloc_Allocator){0},
+	};
+	return ((char *)(data)) + sizeof(Alloc_Arena_Header);
+}
+
 void *alloc_arenaAlloc(void *data, size_t size)
 {
 	Alloc_Arena_Header *header = ALLOC_GET_HEADER(Alloc_Arena_Header, data);
-	if (UTIL_UNLIKELY(header->idx + size >= header->cap)) return NULL;
+	if (ALLOC_UNLIKELY(header->idx + size + sizeof(Alloc_Arena_El_Header) >= header->cap)) {
+		if (header->allocator.alloc) {
+			if (!header->next) {
+				header->next = alloc_arenaNextBlock(header->allocator, ALLOC_MAX(header->cap, 2*size), true);
+			}
+			return alloc_arenaAlloc(header->next, size);
+		} else {
+			alloc_arenaFreeAll(data);
+		}
+	}
 	void *out = &((char *)data)[header->idx + sizeof(Alloc_Arena_El_Header)];
 	header->idx += size + sizeof(Alloc_Arena_El_Header);
 	return out;
@@ -160,10 +176,12 @@ void *alloc_arenaAlloc(void *data, size_t size)
 
 void *alloc_arenaRealloc(void *data, void *ptr, size_t size)
 {
+	if (!ptr) return alloc_arenaAlloc(data, size);
 	Alloc_Arena_Header    *header = ALLOC_GET_HEADER(Alloc_Arena_Header, data);
 	Alloc_Arena_El_Header *elSize = ALLOC_GET_HEADER(Alloc_Arena_El_Header, ptr);
-	if (header->idx == ptr + *elSize) {
-		header->idx = ptr + size;
+	while (ALLOC_UNLIKELY(((char *)(data)) + header->cap < ((char *)(ptr)))) header = ALLOC_GET_HEADER(Alloc_Arena_Header, data);
+	if (header->idx == (size_t)(ptr) + *elSize) {
+		header->idx = (size_t)(ptr) + size;
 		*elSize     = size;
 		return ptr;
 	} else {
@@ -173,16 +191,17 @@ void *alloc_arenaRealloc(void *data, void *ptr, size_t size)
 	}
 }
 
-void  alloc_arenaFree(void *data, void *ptr)
+void alloc_arenaFree(void *data, void *ptr)
 {
 	(void)data;
 	(void)ptr;
 }
 
-void  alloc_arenaFreeAll(void *data)
+void alloc_arenaFreeAll(void *data)
 {
 	Alloc_Arena_Header *header = ALLOC_GET_HEADER(Alloc_Arena_Header, data);
 	header->idx = 0;
+	if (ALLOC_UNLIKELY(header->next)) alloc_arenaFreeAll(header->next);
 	// @Decide: Should we memset previously allocated region to 0?
 }
 

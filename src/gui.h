@@ -17,11 +17,11 @@
 
 #ifndef GUI_MALLOC
 #include <stdlib.h>
-#define GUI_MALLOC malloc
+#define GUI_MALLOC(size) malloc(size)
 #endif
 #ifndef GUI_FREE
 #include <stdlib.h>
-#define GUI_FREE free
+#define GUI_FREE(ptr) free(ptr)
 #endif
 
 typedef enum __attribute__((__packed__)) {

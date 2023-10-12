@@ -17,7 +17,7 @@
 // Macros //
 ////////////
 #ifndef UTIL_MALLOC
-#define UTIL_MALLOC malloc
+#define UTIL_MALLOC(size) malloc(size)
 #endif
 
 #define u8  uint8_t
@@ -84,7 +84,7 @@ bool  util_writeFile(const char *fpath, char *buf, u64 size);
 // a_size and b_size should both be the size in bytes, not the count of elements
 void* util_memadd(const void *a, u64 a_size, const void *b, u64 b_size)
 {
-	char* out = malloc(a_size * b_size);
+	char* out = UTIL_MALLOC(a_size * b_size);
 	memcpy(out, a, a_size);
 	memcpy(&out[a_size], b, b_size);
 	return (void*) out;
@@ -100,7 +100,7 @@ char* util_readFile(const char *fpath, u64 *size)
     struct stat sb;
     if (stat(fpath, &sb) == -1) goto fd_end;
     if (sb.st_size == 0) goto fd_end;
-    out = malloc(sb.st_size);
+    out = UTIL_MALLOC(sb.st_size);
     if (out == NULL) goto fd_end;
     if (read(fd, out, sb.st_size) == -1) goto fd_end;
     *size = (u64) sb.st_size;
