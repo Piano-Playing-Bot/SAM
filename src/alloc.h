@@ -14,6 +14,7 @@
 typedef struct {
 	void *data;
 	void *(*alloc)(void*, size_t);
+	void *(*realloc)(void*, void*, size_t);
     void  (*free)(void*, void*);
     void  (*freeAll)(void*);
 } Alloc_Ctx_Allocator;
@@ -21,11 +22,14 @@ typedef struct {
 // @TODO: This allocator isn't really an arena -> need another name
 typedef struct {
 	size_t cap;
-	size_t perm;
-	size_t tmp;
+	size_t idx;
 } Alloc_Arena_Header;
 
+typedef size_t Alloc_Arena_El_Header;
+
 void *alloc_ctxAlloc(size_t size);
+void *alloc_ctxCalloc(size_t nelem, size_t elsize);
+void *alloc_ctxRealloc(void *ptr, size_t size);
 void  alloc_ctxFree(void *ptr);
 void  alloc_ctxFreeAll();
 void *alloc_stdAlloc(void *data, size_t size);
@@ -39,6 +43,7 @@ void  alloc_arenaFreeAll(void *data);
 static Alloc_Ctx_Allocator alloc_std = {
 	.data    = NULL,
 	.alloc   = alloc_stdAlloc,
+	.realloc = alloc_stdRealloc,
 	.free    = alloc_stdFree,
 	.freeAll = alloc_stdFreeAll,
 };
@@ -67,6 +72,16 @@ void *alloc_ctxAlloc(size_t size)
 	return alloc_ctx->alloc(alloc_ctx->data, size);
 }
 
+void *alloc_ctxCalloc(size_t nelem, size_t elsize)
+{
+	return alloc_ctxAlloc(nelem * elsize);
+}
+
+void *alloc_ctxRealloc(void *ptr, size_t size)
+{
+	return alloc_ctx->realloc(alloc_ctx->data, ptr, size);
+}
+
 void alloc_ctxFree(void *ptr)
 {
 	alloc_ctx->free(alloc_ctx->data, ptr);
@@ -86,6 +101,12 @@ void *alloc_stdAlloc(void *data, size_t size)
 {
 	(void)data;
 	return malloc(size);
+}
+
+void *alloc_stdRealloc(void *data, void *ptr, size_t size)
+{
+	(void)data;
+	return realloc(ptr, size);
 }
 
 void alloc_stdFree(void *data, void *ptr)
@@ -113,12 +134,12 @@ Alloc_Ctx_Allocator alloc_arenaInit(Alloc_Ctx_Allocator allocator, size_t initia
 	void *data = allocator.alloc(allocator.data, sizeof(Alloc_Arena_Header) + initialSize);
 	*((Alloc_Arena_Header *)data) = (Alloc_Arena_Header) {
 		.cap  = initialSize,
-		.perm = 0,
-		.tmp  = 0,
+		.idx  = 0,
 	};
 	return (Alloc_Ctx_Allocator) {
 		.data    = data + sizeof(Alloc_Arena_Header),
-		.alloc   = alloc_arenaAllocTmp,
+		.alloc   = alloc_arenaAlloc,
+		.realloc = alloc_arenaRealloc,
 		.free    = alloc_arenaFree,
 		.freeAll = alloc_arenaFreeAll,
 	};
@@ -128,22 +149,28 @@ Alloc_Ctx_Allocator alloc_arenaInit(Alloc_Ctx_Allocator allocator, size_t initia
 // We would need to add at least two fields to the header then:
 // 1. A pointer at the backing allocator from alloc_arenaInit
 // 2. A pointer to the next Arena buffer
-void *alloc_arenaAllocPerm(void *data, size_t size)
+void *alloc_arenaAlloc(void *data, size_t size)
 {
 	Alloc_Arena_Header *header = ALLOC_GET_HEADER(Alloc_Arena_Header, data);
-	if (UTIL_UNLIKELY(header->perm + header->tmp + size >= header->cap)) return NULL;
-	void *out = &data[header->perm];
-	header->perm += size;
+	if (UTIL_UNLIKELY(header->idx + size >= header->cap)) return NULL;
+	void *out = &((char *)data)[header->idx + sizeof(Alloc_Arena_El_Header)];
+	header->idx += size + sizeof(Alloc_Arena_El_Header);
 	return out;
 }
 
-void *alloc_arenaAllocTmp(void *data, size_t size)
+void *alloc_arenaRealloc(void *data, void *ptr, size_t size)
 {
-	Alloc_Arena_Header *header = ALLOC_GET_HEADER(Alloc_Arena_Header, data);
-	if (UTIL_UNLIKELY(header->perm + header->tmp + size >= header->cap)) return NULL;
-	void *out = &data[header->cap - header->tmp - size - 1];
-	header->tmp += size;
-	return out;
+	Alloc_Arena_Header    *header = ALLOC_GET_HEADER(Alloc_Arena_Header, data);
+	Alloc_Arena_El_Header *elSize = ALLOC_GET_HEADER(Alloc_Arena_El_Header, ptr);
+	if (header->idx == ptr + *elSize) {
+		header->idx = ptr + size;
+		*elSize     = size;
+		return ptr;
+	} else {
+		void *newptr = alloc_arenaAlloc(data, size);
+		memcpy(ptr, newptr, *elSize);
+		return newptr;
+	}
 }
 
 void  alloc_arenaFree(void *data, void *ptr)
@@ -155,7 +182,7 @@ void  alloc_arenaFree(void *data, void *ptr)
 void  alloc_arenaFreeAll(void *data)
 {
 	Alloc_Arena_Header *header = ALLOC_GET_HEADER(Alloc_Arena_Header, data);
-	header->tmp = 0;
+	header->idx = 0;
 	// @Decide: Should we memset previously allocated region to 0?
 }
 
