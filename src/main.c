@@ -71,7 +71,6 @@ UI_View view       = UI_VIEW_START;
 char *startViewMsg = "Drag-and-Drop a MIDI-File to play it on the Piano";
 Gui_Label label    = {0};
 
-// @Cleanup: This is a very bad way of managing memory, using some arena allocator for example would be a much better idea here
 
 int main(void)
 {
