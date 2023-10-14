@@ -15,13 +15,14 @@
 #include <float.h>
 #include "stb_ds.h"
 
-#ifndef GUI_MALLOC
+#if !defined(GUI_MALLOC) && !defined(GUI_FREE)
 #include <stdlib.h>
 #define GUI_MALLOC(size) malloc(size)
-#endif
-#ifndef GUI_FREE
-#include <stdlib.h>
-#define GUI_FREE(ptr) free(ptr)
+#define GUI_FREE(ptr)    free(ptr)
+#elif !defined(GUI_MALLOC) || !defined(GUI_FREE)
+#error "You must define both GUI_MALLOC and GUI_FREE, or neither."
+#elif !defined(UTIL_MALLOC)
+#define UTIL_MALLOC(size) GUI_MALLOC(size)
 #endif
 
 typedef enum __attribute__((__packed__)) {
