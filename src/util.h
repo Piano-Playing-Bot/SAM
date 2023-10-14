@@ -58,7 +58,7 @@
 #define UTIL_LIKELY(expr)   __builtin_expect(!!(expr), 1)
 #define UTIL_SWAP(x, y) do { __typeof__(x) _swap_tmp_ = x; x = y; y = _swap_tmp_; } while (0)
 #define UTIL_PANIC(...) do { printf(__VA_ARGS__); printf("\n"); exit(1); } while (0)
-#define UTIL_TODO() do { printf("Hit TODO in " __FILE__ ":" STR_LINE "\n"); exit(1); } while(0)
+#define UTIL_TODO() do { printf("Hit TODO in " __FILE__ ":" UTIL_STR_LINE "\n"); exit(1); } while(0)
 #define UTIL_UNREACHABLE() do { printf("Reached an unreachable place in " __FILE__ ":" UTIL_STR_LINE "\n"); exit(1); } while(0)
 #define UTIL_STATIC_ASSERT_MSG(expr, msg) { extern int __attribute__((error("assertion failure: '" #msg "' in " __FILE__ ":" STR_LINE))) compile_time_check(); ((expr)?0:compile_time_check()),(void)0; }
 #define UTIL_STATIC_ASSERT(expr) STATIC_ASSERT_MSG(expr, #expr);
