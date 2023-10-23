@@ -7,7 +7,7 @@ set CFLAGS=-Wall -Wextra -Wimplicit -Wpedantic -Wno-unused-function -std=c99
 
 :: Compiler-Options to include dependencies
 set LIB_PATHS=-L./bin
-set INCLUDES=-I./deps/stb -I./deps/tsoding -I./deps/QuelSolaar -I./deps/raylib/src -I./deps/raygui/src
+set INCLUDES=-I./deps/tsoding -I./deps/raylib/src -I./deps/ail
 set RAYLIB_DEP=-lraylib -lopengl32 -lgdi32 -lwinmm -lpthread
 set DEPS=%INCLUDES% %LIB_PATHS% %RAYLIB_DEP%
 
