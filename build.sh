@@ -4,7 +4,7 @@ CFLAGS="-Wall -Wextra -Wimplicit -Wpedantic -Wno-unused-function -std=c99"
 
 LIB_PATHS="-L./bin"
 INCLUDES="-I./deps/tsoding -I./deps/raylib/src -I./deps/ail"
-RAYLIB_DEP="-lraylib -lopengl32 -lgdi32 -lwinmm -lpthread"
+RAYLIB_DEP="-lraylib -lm -lpthread"
 DEPS="$INCLUDES $LIB_PATHS $RAYLIB_DEP $RAYGUI_DEP"
 
 if [[ $1 -eq "a" ]] || [ -d "./bin" ]; then
