@@ -43,26 +43,13 @@ typedef struct {
 } MusicData;
 AIL_DA_INIT(MusicData);
 
-typedef struct {
-    u8 num;    // Numerator
-    u8 den;    // Denominator expressed as a (negative) power of 2
-    u8 clocks; // Number of MIDI-Clocks in a metronome click
-    u8 b;      // Number of notate 32nd notes in quarter-notes (aka in 24 MIDI-Clocks)
-} MIDI_Time_Signature;
-
-typedef struct { // See definition in Spec
-    i8 sf;
-    i8 mi;
-} MIDI_Key_Signature;
-
 void *loadLibrary(void *arg);
-void *parseFile(void *filePath);
-u32 readVarLen(AIL_Buffer *buffer);
-void* util_memadd(const void *a, u64 a_size, const void *b, u64 b_size);
+void *parseFile(void *_filePath);
+void *util_memadd(const void *a, u64 a_size, const void *b, u64 b_size);
 
 
-#define SWITCH_CTX_THREADSAFE(allocator)      { pthread_mutex_lock(&allocCtxMutex); AIL_ALLOC_SWITCH_CTX(allocator);      pthread_mutex_unlock(&allocCtxMutex); }
-#define SWITCH_BACK_CTX_THREADSAFE(allocator) { pthread_mutex_lock(&allocCtxMutex); AIL_ALLOC_SWITCH_BACK_CTX(allocator); pthread_mutex_unlock(&allocCtxMutex); }
+#define SWITCH_CTX_THREADSAFE(allocator)      do { pthread_mutex_lock(&allocCtxMutex); AIL_ALLOC_SWITCH_CTX(allocator);      pthread_mutex_unlock(&allocCtxMutex); } while(0)
+#define SWITCH_BACK_CTX_THREADSAFE(allocator) do { pthread_mutex_lock(&allocCtxMutex); AIL_ALLOC_SWITCH_BACK_CTX(allocator); pthread_mutex_unlock(&allocCtxMutex); } while(0)
 pthread_mutex_t allocCtxMutex = PTHREAD_MUTEX_INITIALIZER;
 AIL_Alloc_Allocator frameArena;
 AIL_Alloc_Allocator uiStrArena;
@@ -250,19 +237,6 @@ end:
     return NULL;
 }
 
-// Code taken from MIDI Standard
-u32 readVarLen(AIL_Buffer *buffer)
-{
-    u32 value;
-    u8 c;
-    if ((value = ail_buf_read1(buffer)) & 0x80) {
-        value &= 0x7f;
-        do {
-            value = (value << 7) + ((c = ail_buf_read1(buffer)) & 0x7f);
-        } while (c & 0x80); }
-    return value;
-}
-
 void *parseFile(void *_filePath)
 {
     SET_PROG(0.01f);
@@ -291,146 +265,6 @@ void *parseFile(void *_filePath)
         return NULL;
     }
 
-    #define midiFileStartLen 8
-    const char midiFileStart[midiFileStartLen] = {'M', 'T', 'h', 'd', 0, 0, 0, 6};
-
-    SET_PROG(0.05f);
-    // @Performance: Reading the file might take a while.
-    // If another thread wanted to switch the allocation context, they would be blocked, until the file is read.
-    // This is currently not a problem yet, bc the main thread doesn't switch allocation contexts,
-    // while the file is being parsed, but it might become a problem in the future
-    SWITCH_CTX_THREADSAFE(ail_alloc_std);
-    AIL_Buffer buffer = ail_buf_from_file(filePath);
-    SWITCH_BACK_CTX_THREADSAFE();
-    SET_PROG(0.1f);
-
-    if (buffer.size < 14 || memcmp(buffer.data, midiFileStart, midiFileStartLen) != 0) {
-        errMsg = "Invalid Midi File provided.\nMake sure the File wasn't corrupted.";
-        label.text.data = errMsg;
-        SET_PROG(progFail);
-        return NULL;
-    }
-    buffer.idx += midiFileStartLen;
-
-    u32 tempo; // @TODO: Initialize to 120BPM
-    (void)tempo;
-    MIDI_Time_Signature timeSignature = { // Initialized to 4/4
-        .num = 4,
-        .den = 2,
-        .clocks = 18,
-        .b = 8,
-    };
-    (void)timeSignature;
-    MIDI_Key_Signature keySignature = {0};
-    (void)keySignature;
-
-    u16 format   = ail_buf_read2msb(&buffer);
-    u16 ntrcks   = ail_buf_read2msb(&buffer);
-    u16 division = ail_buf_read2msb(&buffer);
-    (void)division;
-
-    if (format > 2) {
-        errMsg = "Unknown Midi Format.\nPlease try a different Midi File.";
-        label.text.data = errMsg;
-        SET_PROG(progFail);
-        return NULL;
-    }
-
-    for (u16 i = 0; i < ntrcks; i++) {
-        // Parse track chunks
-        SET_PROG(AIL_MIN(0.9f, prog + ((float)i/(float)ntrcks)));
-        u32 chunkLen  = ail_buf_read4msb(&buffer);
-        u32 chunkEnd  = buffer.idx + chunkLen;
-        while (buffer.idx < chunkEnd) {
-            // Parse MTrk events
-            SET_PROG(prog + (float)buffer.idx/((float)ntrcks*(float)chunkEnd));
-            // @TODO: How is the deltaTime used? What does it tell me?
-            u32 deltaTime = readVarLen(&buffer);
-            (void)deltaTime;
-                if (ail_buf_peek1(buffer) == 0xff) {
-                    // Meta Event
-                    switch (ail_buf_read1(&buffer)) {
-                        case 0x00: {
-                            AIL_TODO();
-                        } break;
-                        case 0x01: {
-                            AIL_TODO();
-                        } break;
-                        case 0x02: {
-                            AIL_TODO();
-                        } break;
-                        case 0x03: { // Sequence/Track Name - ignored
-                            u32 len = readVarLen(&buffer);
-                            buffer.idx += len;
-                        } break;
-                        case 0x04: {
-                            AIL_TODO();
-                        } break;
-                        case 0x05: {
-                            AIL_TODO();
-                        } break;
-                        case 0x06: {
-                            AIL_TODO();
-                        } break;
-                        case 0x07: {
-                            AIL_TODO();
-                        } break;
-                        case 0x20: {
-                            AIL_TODO();
-                        } break;
-                        case 0x2f: {
-                            AIL_TODO();
-                        } break;
-                        case 0x51: {
-                            // @TODO: This is a change of tempo and should thus be recorded for the track somehow
-                            if (ail_buf_read1(&buffer) != 3) AIL_UNREACHABLE();
-                            tempo = (ail_buf_read1(&buffer) << 24) | ail_buf_read2msb(&buffer);
-                        } break;
-                        case 0x54: {
-                            AIL_TODO();
-                        } break;
-                        case 0x58: { // Time Signature - important
-                            if (ail_buf_read1(&buffer) != 4) AIL_UNREACHABLE();
-                            timeSignature = (MIDI_Time_Signature) {
-                                .num    = ail_buf_read1(&buffer),
-                                .den    = ail_buf_read1(&buffer),
-                                .clocks = ail_buf_read1(&buffer),
-                                .b      = ail_buf_read1(&buffer),
-                            };
-                        } break;
-                        case 0x59: {
-                            if (ail_buf_read1(&buffer) != 2) AIL_UNREACHABLE();
-                            keySignature = (MIDI_Key_Signature) {
-                                .sf = (i8) ail_buf_read1(&buffer),
-                                .mi = (i8) ail_buf_read1(&buffer),
-                            };
-                        } break;
-                        case 0x7f: {
-                            AIL_TODO();
-                        } break;
-                        default: {
-                            buffer.idx--;
-                            printf("Parsing track event %#04x is not yet implemented.\n", ail_buf_peek2msb(buffer));
-                        }
-                    }
-                }
-                else if (ail_buf_peek1(buffer) & 0x80) {
-                    u8 status  = (ail_buf_peek1(buffer) & 0xf0) >> 4;
-                    u8 channel = ail_buf_read1(&buffer) & 0x0f;
-                    (void)channel;
-                    switch (status) {
-                        default: {
-                            AIL_TODO();
-                        }
-                    }
-                }
-                else {
-                    // MIDI Event or System-Exclusive Event
-                    printf("Parsing track event %#02x is not yet implemented.\n", ail_buf_peek1(buffer));
-                    AIL_TODO();
-                }
-        }
-    }
-
+    // @TODO: Call parseMidi()
     return NULL;
 }
