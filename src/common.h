@@ -22,6 +22,7 @@ typedef enum {
     KEY_A,
     KEY_AS,
     KEY_B,
+    KEY_AMOUNT,
 } Key;
 
 // A MusicChunk represents whether a note should be played or stopped being played, the time at which this should happen, how long the transition from not-playing to playing (or vice versa) should take and which note exactly should be played

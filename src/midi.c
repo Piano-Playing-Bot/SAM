@@ -9,6 +9,8 @@
 #include "ail_buf.h"
 #include "common.h"  // For common type definitions used in this project
 
+#define MIDI_0KEY_OCTAVE -5
+
 typedef struct {
     u8 num;    // Numerator
     u8 den;    // Denominator expressed as a (negative) power of 2
@@ -70,24 +72,24 @@ Song parseMidi(char *filePath)
     }
     buffer.idx += midiFileStartLen;
 
-    u32 tempo; // @TODO: Initialize to 120BPM
-    (void)tempo;
+    u32 tempo = 500000; // in ms. 500000ms = 120BPM (default value)
     MIDI_Time_Signature timeSignature = { // Initialized to 4/4
         .num = 4,
         .den = 2,
         .clocks = 18,
         .b = 8,
     };
-    (void)timeSignature;
     MIDI_Key_Signature keySignature = {0};
-    (void)keySignature;
 
     u16 format   = ail_buf_read2msb(&buffer);
     u16 ntrcks   = ail_buf_read2msb(&buffer);
-    u16 division = ail_buf_read2msb(&buffer);
-    (void)division;
+    u16 ticksPQN = ail_buf_read2msb(&buffer);
+    if (ticksPQN & 0x8000) {
+        // If first bit is set, a different encoding is used for some reason
+        AIL_TODO();
+    }
 
-    printf("format: %d, ntrcks: %d, division: %d\n", format, ntrcks, division);
+    printf("format: %d, ntrcks: %d, ticks per quarter-note: %d\n", format, ntrcks, ticksPQN);
 
     if (format > 2) {
         printf("Unknown Midi Format.\nPlease try a different Midi File\n");
@@ -98,15 +100,16 @@ Song parseMidi(char *filePath)
     u8 channel = 0; // used in running status
     for (u16 i = 0; i < ntrcks; i++) {
         // Parse track chunks
+        u64 ticks  = 0; // Amount of ticks of the virtual midi clock
         AIL_ASSERT(ail_buf_read4msb(&buffer) == 0x4D54726B);
         u32 chunkLen   = ail_buf_read4msb(&buffer);
         u32 chunkEnd   = buffer.idx + chunkLen;
         printf("Parsing chunk from %#010llx to %#010x\n", buffer.idx, chunkEnd);
         while (buffer.idx < chunkEnd) {
             // Parse MTrk events
-            // @TODO: How is the deltaTime used? What does it tell me?
             u32 deltaTime = readVarLen(&buffer);
             printf("deltaTime: %d\n", deltaTime);
+            ticks += deltaTime;
             if (ail_buf_peek1(buffer) == 0xff) {
                 buffer.idx++;
                 // Meta Event
@@ -147,7 +150,7 @@ Song parseMidi(char *filePath)
                     case 0x51: {
                         // @TODO: This is a change of tempo and should thus be recorded for the track somehow
                         AIL_ASSERT(ail_buf_read1(&buffer) == 3);
-                        tempo = (ail_buf_read1(&buffer) << 24) | ail_buf_read2msb(&buffer);
+                        tempo = ail_buf_read3msb(&buffer);
                         printf("tempo: %d\n", tempo);
                     } break;
                     case 0x54: {
@@ -193,13 +196,21 @@ Song parseMidi(char *filePath)
                 }
                 printf("Command: %#01x, Channel: %#01x\n", command, channel);
                 switch (command) {
-                    case 0x8: {
-                        // Note off
-                        AIL_TODO();
-                    } break;
+                    case 0x8:
                     case 0x9: {
-                        // Note on
-                        AIL_TODO();
+                        // Note off / on
+                        u8 key      = ail_buf_read1(&buffer);
+                        u8 velocity = ail_buf_read1(&buffer);
+                        MusicChunk chunk = {
+                            .time   = ticks * (u64)(((f32)tempo / (f32)ticksPQN) / 1000.0f),
+                            .len    = velocity, // @Study: Is this correct?
+                            .key    = key % KEY_AMOUNT,
+                            .octave = MIDI_0KEY_OCTAVE + (key / KEY_AMOUNT),
+                            .on     = command == 0x9 && velocity != 0,
+                        };
+                        u64 chunkEnd = chunk.time + chunk.len;
+                        if (AIL_LIKELY(chunkEnd > song.len)) song.len = chunkEnd;
+                        ail_da_push(&song.chunks, chunk);
                     } break;
                     case 0xA: {
                         // Polyphonic Key Pressure
@@ -273,7 +284,7 @@ Song parseMidi(char *filePath)
 
 int main(void)
 {
-    Song song = parseMidi("../midis/Empty.mid");
+    Song song = parseMidi("../midis/A couple notes.mid");
 
     char *keyStrs[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     printf("{\n  name: %s\n  len: %lldms\n  clock: %dms\n  chunks: [\n", song.name, song.len, song.clock);
