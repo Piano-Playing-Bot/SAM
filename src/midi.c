@@ -66,7 +66,7 @@ Song parseMidi(char *filePath)
     #define midiFileStartLen 8
     const char midiFileStart[midiFileStartLen] = {'M', 'T', 'h', 'd', 0, 0, 0, 6};
 
-    if (buffer.size < 14 || memcmp(buffer.data, midiFileStart, midiFileStartLen) != 0) {
+    if (buffer.len < 14 || memcmp(buffer.data, midiFileStart, midiFileStartLen) != 0) {
         printf("Invalid Midi File provided.\nMake sure the File wasn't corrupted\n");
         exit(1);
     }
@@ -282,16 +282,93 @@ Song parseMidi(char *filePath)
     return song;
 }
 
+void writeMidi(Song song, char *fpath)
+{
+    AIL_Buffer buffer = ail_buf_new(2048);
+    ail_buf_write1(&buffer, 'M');
+    ail_buf_write1(&buffer, 'T');
+    ail_buf_write1(&buffer, 'h');
+    ail_buf_write1(&buffer, 'd');
+    ail_buf_write4msb(&buffer, 6);
+    ail_buf_write2msb(&buffer, 0);
+    ail_buf_write2msb(&buffer, 1);
+    ail_buf_write2msb(&buffer, 480);
+
+    ail_buf_write1(&buffer, 'M');
+    ail_buf_write1(&buffer, 'T');
+    ail_buf_write1(&buffer, 'r');
+    ail_buf_write1(&buffer, 'k');
+    u64 len_idx = buffer.idx;
+    buffer.idx += 4;
+
+    ail_buf_write3msb(&buffer, 0x00ff03); // deltaTime + Status for name
+    ail_buf_write1(&buffer, strlen(song.name));
+    for (u8 i = 0; i < (u8)strlen(song.name); i++) ail_buf_write1(&buffer, song.name[i]);
+
+    ail_buf_write3msb(&buffer, 0x00ff58); // deltaTime + Status for Time-Signature
+    ail_buf_write1(&buffer, 4);
+    ail_buf_write4msb(&buffer, 0x04021808); // Time-Signature
+
+    ail_buf_write3msb(&buffer, 0x00ff59); // deltaTime + Status for Key-Signature
+    ail_buf_write3msb(&buffer, 0x020000); // len + Key-Signature
+
+    // Tempo
+    ail_buf_write3msb(&buffer, 0x00ff51);
+    ail_buf_write1(&buffer, 3);
+    ail_buf_write3msb(&buffer, 500000);
+
+    // Control Changes
+    ail_buf_write4msb(&buffer, 0x00b07900);
+    ail_buf_write3msb(&buffer, 0x006400);
+    ail_buf_write3msb(&buffer, 0x006500);
+    ail_buf_write3msb(&buffer, 0x00060c);
+    ail_buf_write3msb(&buffer, 0x00647f);
+    ail_buf_write3msb(&buffer, 0x00657f);
+    ail_buf_write3msb(&buffer, 0x00c000);
+    ail_buf_write4msb(&buffer, 0x00b00764);
+    ail_buf_write3msb(&buffer, 0x000a40);
+    ail_buf_write3msb(&buffer, 0x005b00);
+    ail_buf_write3msb(&buffer, 0x005d00);
+    ail_buf_write3msb(&buffer, 0x00ff21);
+    ail_buf_write2msb(&buffer, 0x0100);
+
+    // Notes
+    u64 last_time = 0;
+    for (u32 i = 0; i < song.chunks.len; i++) {
+        MusicChunk c = song.chunks.data[i];
+        u32 delta_time = c.time - last_time;
+        do {
+            ail_buf_write1(&buffer, delta_time & 0xff);
+            delta_time >>= 7;
+        } while (delta_time & 0x80);
+        last_time = c.time;
+        ail_buf_write1(&buffer, c.on ? 0x90 : 0x80);
+        ail_buf_write1(&buffer, (c.octave - MIDI_0KEY_OCTAVE)*KEY_AMOUNT + c.key);
+        ail_buf_write1(&buffer, c.time);
+    }
+
+    ail_buf_write4msb(&buffer, 0x01ff2f00);
+
+    u64 cur_idx = buffer.idx;
+    buffer.idx  = len_idx;
+    ail_buf_write4msb(&buffer, cur_idx - (len_idx + 4));
+    buffer.idx  = cur_idx;
+
+    ail_buf_to_file(&buffer, fpath);
+}
+
 int main(void)
 {
-    Song song = parseMidi("../midis/A couple notes.mid");
+    Song song = parseMidi("../midis/A Couple Notes.mid");
 
     char *keyStrs[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    printf("{\n  name: %s\n  len: %lldms\n  clock: %dms\n  chunks: [\n", song.name, song.len, song.clock);
+    printf("{\n  name: %s\n  len: %lldms\n  chunks: [\n", song.name, song.len);
     for (u32 i = 0; i < song.chunks.len; i++) {
         MusicChunk c = song.chunks.data[i];
         printf("    { key: %2s, octave: %2d, on: %c, time: %lld, len: %d }\n", keyStrs[c.key], c.octave, c.on ? 'y' : 'n', c.time, c.len);
     }
     printf("  ]\n}\n");
+
+    writeMidi(song, "../midis/test.mid");
     return 0;
 }

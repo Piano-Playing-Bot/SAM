@@ -5,9 +5,8 @@
 #include "ail.h"
 
 // @Note on time: The idea is to use discretized clock-cycles for measuring time.
-// The clock parameter in Song represents the length of each clock-cycle in milliseconds
-// The clock parameter in MusicChunk represents on which clock-cycle the chunk should start playing
-// The len paramter in MusicChunk represents how many clock-cycles the chunk should take to be completed
+// The time parameter in MusicChunk represents at which millisecond the chunk should start playing
+// The len paramter in MusicChunk represents how many milliseconds the chunk should take to be completed
 
 typedef enum {
     KEY_C = 0,
@@ -38,7 +37,6 @@ AIL_DA_INIT(MusicChunk);
 typedef struct {
     char *name;  // Name of the Song, that is shown in the UI
     u64   len;   // Length in milliseconds of the entire Song
-    u32   clock; // Length of a single clock-cycle in milliseconds
     AIL_DA(MusicChunk) chunks;
 } Song;
 
