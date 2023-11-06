@@ -3,13 +3,13 @@
 //////////////
 
 #include <stdbool.h> // For boolean definitions
-#include <stdio.h>   // For printf - only used for debugging
-#include <assert.h>  // For assert
 #include <string.h>  // For memcpy
 #include "raylib.h"  // For immediate UI framework
 #include <pthread.h> // For threads and mutexes
 #include <unistd.h>  // For sleep @Cleanup
-
+#include "common.h"
+#define MIDI_IMPL
+#include "midi.h"
 #define AIL_ALL_IMPL
 #include "ail.h"
 #define AIL_GUI_IMPL
@@ -21,28 +21,18 @@
 #define AIL_ALLOC_IMPL
 #include "ail_alloc.h"
 
+// PIDI = Piano Digital Interface
+// PDIL = PIDI-Library
 
-u64 LIBRARY_FILE_MAGIC = ((u64)'M' << 56) | ((u64)'u' << 48) | ((u64)'s' << 40) | ((u64)'i' << 32) |
-                         ((u64)'c' << 24) | ((u64)'L' << 16) | ((u64)'i' <<  8) | ((u64)'b' <<  0);
+u32 PIDI_MAGIC = ('P' << 24) | ('I' << 16) | ('D' << 8) | ('I' << 0);
+u32 PDIL_MAGIC = ('P' << 24) | ('D' << 16) | ('I' << 8) | ('L' << 0);
 
 typedef enum {
     UI_VIEW_START,
     UI_VIEW_FILE,
 } UI_View;
 
-typedef struct {
-    // @TODO
-} MusicChunk;
-AIL_DA_INIT(MusicChunk);
-
-typedef struct {
-    char *name;
-    char *filename;
-    u64   len;     // in microseconds
-    AIL_DA(MusicChunk) data;
-} MusicData;
-AIL_DA_INIT(MusicData);
-
+void print_song(Song song);
 void *loadLibrary(void *arg);
 void *parseFile(void *_filePath);
 void *util_memadd(const void *a, u64 a_size, const void *b, u64 b_size);
@@ -55,16 +45,13 @@ AIL_Alloc_Allocator frameArena;
 AIL_Alloc_Allocator uiStrArena;
 
 // These variables are all accessed by main and parseFile (and the functions called by parseFile)
-pthread_mutex_t progMutex = PTHREAD_MUTEX_INITIALIZER;
-float prog     = 0.0f; // Always between 0 and 1 or progSucc or progFail
-float progSucc = 2.0f;
-float progFail = -1.0f;
-char *errMsg   = NULL; // Must be set to some message, if prog==progFail
-#define SET_PROG(f) { pthread_mutex_lock(&progMutex); prog = (f); pthread_mutex_unlock(&progMutex); }
+static bool fileParsed;
+static Song song;
+static char *errMsg;
 
 // These variables are all accessed by main and loadLibrary
-AIL_DA(MusicData) library;
-bool libraryReady  = false;
+AIL_DA(Song) library;
+bool libraryReady = false;
 
 
 UI_View view       = UI_VIEW_START;
@@ -153,24 +140,14 @@ int main(void)
             } break;
 
             case UI_VIEW_FILE: {
-                float perc;
-                pthread_mutex_lock(&progMutex);
-                perc = prog;
-                pthread_mutex_unlock(&progMutex);
-
-                // @TODO: Animate the progress bar
-                if (perc == progFail) {
-                    label.text.data = errMsg;
-                    errMsg = NULL;
-                    view = UI_VIEW_START;
-                } else if (perc == progSucc) {
+                // @TODO: Animate a loading animation
+                static bool wasFileParsedBefore = false;
+                if (fileParsed) {
+                    if (!wasFileParsedBefore) print_song(song);
                     ail_gui_drawSized("Success!!!", (Rectangle){0, 0, winWidth, winHeight}, style_default);
+                    wasFileParsedBefore = true;
                 } else {
-                    i32 height = size_default;
-                    i32 y      = (winHeight - height)/2.0f;
-                    i32 width  = winWidth - 2*style_default.pad;
-                    DrawRectangle(style_default.pad, y, width, height, LIGHTGRAY);
-                    DrawRectangle(style_default.pad, y, perc*width, height, GREEN);
+                    ail_gui_drawSized("Loading...", (Rectangle){0, 0, winWidth, winHeight}, style_default);
                 }
             } break;
         }
@@ -183,6 +160,17 @@ int main(void)
 
     CloseWindow();
     return 0;
+}
+
+void print_song(Song song)
+{
+    char *keyStrs[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    printf("{\n  name: %s\n  len: %lldms\n  chunks: [\n", song.name, song.len);
+    for (u32 i = 0; i < song.chunks.len; i++) {
+        MusicChunk c = song.chunks.data[i];
+        printf("    { key: %2s, octave: %2d, on: %c, time: %lld, len: %d }\n", keyStrs[c.key], c.octave, c.on ? 'y' : 'n', c.time, c.len);
+    }
+    printf("  ]\n}\n");
 }
 
 // Returns a new array, that contains first array a and then array b. Useful for adding strings for example
@@ -198,10 +186,10 @@ void* util_memadd(const void *a, u64 a_size, const void *b, u64 b_size)
 void *loadLibrary(void *arg)
 {
     (void)arg;
-    library = ail_da_new(MusicData);
+    library = ail_da_new(Song);
     SWITCH_CTX_THREADSAFE(ail_alloc_std);
     const char *dataDir = "./data/";
-    const char *libraryFilename = "library";
+    const char *libraryFilename = "lib.pdil";
     char *libraryFilepath = util_memadd(dataDir, strlen(dataDir), libraryFilename, strlen(libraryFilename) + 1);
     SWITCH_BACK_CTX_THREADSAFE();
 
@@ -212,7 +200,7 @@ void *loadLibrary(void *arg)
     else {
         if (!FileExists(libraryFilepath)) goto nothing_to_load;
         AIL_Buffer buf = ail_buf_from_file(libraryFilepath);
-        if (ail_buf_read8msb(&buf) != LIBRARY_FILE_MAGIC) goto nothing_to_load;
+        if (ail_buf_read8msb(&buf) != PDIL_MAGIC) goto nothing_to_load;
         u32 n = ail_buf_read4lsb(&buf);
         library.cap = n;
         for (; n > 0; n--) {
@@ -239,32 +227,10 @@ end:
 
 void *parseFile(void *_filePath)
 {
-    SET_PROG(0.01f);
-    char *filePath = (char *)_filePath;
-    i32   pathLen  = strlen(filePath);
-
-    char *fileName = filePath;
-    i32   nameLen  = pathLen;
-    for (i32 i = pathLen-2; i > 0; i--) {
-        if (filePath[i] == '/' || (filePath[i] == '\\' && filePath[i+1] != ' ')) {
-            fileName = &filePath[i+1];
-            nameLen  = pathLen - 1 - i;
-            break;
-        }
-    }
-
-    if (pathLen < 4 || memcmp(&filePath[pathLen - 4], ".mid", 4) != 0) {
-        SWITCH_CTX_THREADSAFE(uiStrArena);
-        const char *e1 = "'";
-        const char *e2 = "' is not a Midi-File.\nTry again with a Midi-File, please.";
-        errMsg = util_memadd(e1, strlen(e1), fileName, nameLen);
-        errMsg = util_memadd(errMsg, strlen(e1) + nameLen, e2, strlen(e2));
-        label.text.data = errMsg;
-        SWITCH_BACK_CTX_THREADSAFE();
-        SET_PROG(progFail);
-        return NULL;
-    }
-
-    // @TODO: Call parseMidi()
+    ParseMidiRes res = parseMidi((char *)_filePath);
+    errMsg = NULL;
+    if (res.succ) song = res.val.song;
+    else errMsg = res.val.err;
+    fileParsed = true;
     return NULL;
 }

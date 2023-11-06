@@ -1,13 +1,28 @@
+#ifndef MIDI_H_
+#define MIDI_H_
+
+#include "common.h"
 #include <stdbool.h> // For boolean definitions
-#include <stdlib.h>  // For exit, malloc, memcpy
-#include <stdio.h>   // For printf - only used for debugging
+#include <stdlib.h>  // For malloc, memcpy
 #define AIL_ALL_IMPL
 #include "ail.h"
 #define AIL_FS_IMPL
 #include "ail_fs.h"
 #define AIL_BUF_IMPL
 #include "ail_buf.h"
-#include "common.h"  // For common type definitions used in this project
+
+typedef union {
+	Song song;
+	char err[256];
+} ParseMidiResVal;
+
+typedef struct {
+	bool succ;
+	ParseMidiResVal val;
+} ParseMidiRes;
+
+
+// MIDI Stuff
 
 #define MIDI_0KEY_OCTAVE -5
 
@@ -23,6 +38,23 @@ typedef struct { // See definition in Spec
     i8 mi;
 } MIDI_Key_Signature;
 
+u32 readVarLen(AIL_Buffer *buffer);
+ParseMidiRes parseMidi(char *filePath);
+void writeMidi(Song song, char *fpath);
+
+#endif // MIDI_H_
+
+#ifdef MIDI_IMPL
+#ifndef _MIDI_IMPL_GUARD_
+#define _MIDI_IMPL_GUARD_
+
+#ifdef DEBUG
+#include <stdio.h> // For printf - only used for debugging
+#define dbg_log(...) printf(__VA_ARGS__)
+#else
+#define dbg_log(...) do { if (0) printf(__VA_ARGS__); } while(0)
+#endif
+
 // Code taken from MIDI Standard
 u32 readVarLen(AIL_Buffer *buffer)
 {
@@ -36,9 +68,9 @@ u32 readVarLen(AIL_Buffer *buffer)
     return value;
 }
 
-Song parseMidi(char *filePath)
+ParseMidiRes parseMidi(char *filePath)
 {
-    Song song = {0};
+    ParseMidiResVal val = {0};
     i32   pathLen  = strlen(filePath);
     char *fileName = filePath;
     i32   nameLen  = pathLen;
@@ -52,23 +84,23 @@ Song parseMidi(char *filePath)
 
     #define EXT_LEN 4
     if (pathLen < EXT_LEN || memcmp(&filePath[pathLen - EXT_LEN], ".mid", EXT_LEN) != 0) {
-        printf("%s is not a midi file\n", fileName);
-        exit(1);
+        sprintf(val.err, "%s is not a midi file\n", fileName);
+        return (ParseMidiRes) { false, val };
     }
 
     AIL_Buffer buffer = ail_buf_from_file(filePath);
     // Remove file-ending from filename
     nameLen -= EXT_LEN;
-    song.name = malloc((nameLen + 1) * sizeof(char));
-    memcpy(song.name, fileName, nameLen);
-    song.name[nameLen] = 0;
+    val.song.name = malloc((nameLen + 1) * sizeof(char));
+    memcpy(val.song.name, fileName, nameLen);
+    val.song.name[nameLen] = 0;
 
     #define midiFileStartLen 8
     const char midiFileStart[midiFileStartLen] = {'M', 'T', 'h', 'd', 0, 0, 0, 6};
 
     if (buffer.len < 14 || memcmp(buffer.data, midiFileStart, midiFileStartLen) != 0) {
-        printf("Invalid Midi File provided.\nMake sure the File wasn't corrupted\n");
-        exit(1);
+        sprintf(val.err, "Invalid Midi File provided.\nMake sure the File wasn't corrupted\n");
+        return (ParseMidiRes) { false, val };
     }
     buffer.idx += midiFileStartLen;
 
@@ -89,11 +121,11 @@ Song parseMidi(char *filePath)
         AIL_TODO();
     }
 
-    printf("format: %d, ntrcks: %d, ticks per quarter-note: %d\n", format, ntrcks, ticksPQN);
+    dbg_log("format: %d, ntrcks: %d, ticks per quarter-note: %d\n", format, ntrcks, ticksPQN);
 
     if (format > 2) {
-        printf("Unknown Midi Format.\nPlease try a different Midi File\n");
-        exit(1);
+        sprintf(val.err, "Unknown Midi Format.\nPlease try a different Midi File\n");
+        return (ParseMidiRes) { false, val };
     }
 
     u8 command = 0; // used in running status (@Note: status == command)
@@ -104,11 +136,11 @@ Song parseMidi(char *filePath)
         AIL_ASSERT(ail_buf_read4msb(&buffer) == 0x4D54726B);
         u32 chunkLen   = ail_buf_read4msb(&buffer);
         u32 chunkEnd   = buffer.idx + chunkLen;
-        printf("Parsing chunk from %#010llx to %#010x\n", buffer.idx, chunkEnd);
+        dbg_log("Parsing chunk from %#010llx to %#010x\n", buffer.idx, chunkEnd);
         while (buffer.idx < chunkEnd) {
             // Parse MTrk events
             u32 deltaTime = readVarLen(&buffer);
-            printf("deltaTime: %d\n", deltaTime);
+            dbg_log("deltaTime: %d\n", deltaTime);
             ticks += deltaTime;
             if (ail_buf_peek1(buffer) == 0xff) {
                 buffer.idx++;
@@ -151,7 +183,7 @@ Song parseMidi(char *filePath)
                         // @TODO: This is a change of tempo and should thus be recorded for the track somehow
                         AIL_ASSERT(ail_buf_read1(&buffer) == 3);
                         tempo = ail_buf_read3msb(&buffer);
-                        printf("tempo: %d\n", tempo);
+                        dbg_log("tempo: %d\n", tempo);
                     } break;
                     case 0x54: {
                         AIL_TODO();
@@ -164,7 +196,7 @@ Song parseMidi(char *filePath)
                             .clocks = ail_buf_read1(&buffer),
                             .b      = ail_buf_read1(&buffer),
                         };
-                        printf("timeSignature: (%d, %d, %d, %d)\n", timeSignature.num, timeSignature.den, timeSignature.clocks, timeSignature.b);
+                        dbg_log("timeSignature: (%d, %d, %d, %d)\n", timeSignature.num, timeSignature.den, timeSignature.clocks, timeSignature.b);
                     } break;
                     case 0x59: {
                         AIL_ASSERT(ail_buf_read1(&buffer) == 2);
@@ -172,14 +204,15 @@ Song parseMidi(char *filePath)
                             .sf = (i8) ail_buf_read1(&buffer),
                             .mi = (i8) ail_buf_read1(&buffer),
                         };
-                        printf("keySignature: (%d, %d)\n", keySignature.sf, keySignature.mi);
+                        dbg_log("keySignature: (%d, %d)\n", keySignature.sf, keySignature.mi);
                     } break;
                     case 0x7f: {
                         AIL_TODO();
                     } break;
                     default: {
                         buffer.idx -= 2;
-                        printf("\033[33mEncountered unknown meta event %#04x.\033[0m\n", ail_buf_read2msb(&buffer));
+                        u16 ev = ail_buf_read2msb(&buffer);
+                        dbg_log("\033[33mEncountered unknown meta event %#04x.\033[0m\n", ev);
                         u8 len = ail_buf_read1(&buffer);
                         buffer.idx += len;
                     }
@@ -190,11 +223,11 @@ Song parseMidi(char *filePath)
                 if (ail_buf_peek1(buffer) & 0x80) {
                     command = (ail_buf_peek1(buffer) & 0xf0) >> 4;
                     channel = ail_buf_read1(&buffer) & 0x0f;
-                    printf("New Satus - ");
+                    dbg_log("New Satus - ");
                 } else {
-                    printf("Running Status - ");
+                    dbg_log("Running Status - ");
                 }
-                printf("Command: %#01x, Channel: %#01x\n", command, channel);
+                dbg_log("Command: %#01x, Channel: %#01x\n", command, channel);
                 switch (command) {
                     case 0x8:
                     case 0x9: {
@@ -204,13 +237,13 @@ Song parseMidi(char *filePath)
                         MusicChunk chunk = {
                             .time   = ticks * (u64)(((f32)tempo / (f32)ticksPQN) / 1000.0f),
                             .len    = velocity, // @Study: Is this correct?
-                            .key    = key % KEY_AMOUNT,
-                            .octave = MIDI_0KEY_OCTAVE + (key / KEY_AMOUNT),
+                            .key    = key % PIANO_KEY_AMOUNT,
+                            .octave = MIDI_0KEY_OCTAVE + (key / PIANO_KEY_AMOUNT),
                             .on     = command == 0x9 && velocity != 0,
                         };
                         u64 chunkEnd = chunk.time + chunk.len;
-                        if (AIL_LIKELY(chunkEnd > song.len)) song.len = chunkEnd;
-                        ail_da_push(&song.chunks, chunk);
+                        if (AIL_LIKELY(chunkEnd > val.song.len)) val.song.len = chunkEnd;
+                        ail_da_push(&val.song.chunks, chunk);
                     } break;
                     case 0xA: {
                         // Polyphonic Key Pressure
@@ -220,7 +253,7 @@ Song parseMidi(char *filePath)
                         // Control Change
                         u8 c = ail_buf_read1(&buffer);
                         u8 v = ail_buf_read1(&buffer);
-                        printf("Control Change: c = %#01x, v = %#01x\n", c, v);
+                        dbg_log("Control Change: c = %#01x, v = %#01x\n", c, v);
                         AIL_ASSERT(v <= 127);
                         if (c < 120) {
                             // Do nothing for now
@@ -259,7 +292,7 @@ Song parseMidi(char *filePath)
                     case 0xC: {
                         // Program Change
                         u8 patch = ail_buf_read1(&buffer);
-                        printf("Program Change: patch = %d\n", patch);
+                        dbg_log("Program Change: patch = %d\n", patch);
                         // Do nothing
                     } break;
                     case 0xD: {
@@ -279,7 +312,7 @@ Song parseMidi(char *filePath)
         }
     }
 
-    return song;
+    return (ParseMidiRes) { true, val };
 }
 
 void writeMidi(Song song, char *fpath)
@@ -343,7 +376,7 @@ void writeMidi(Song song, char *fpath)
         } while (delta_time & 0x80);
         last_time = c.time;
         ail_buf_write1(&buffer, c.on ? 0x90 : 0x80);
-        ail_buf_write1(&buffer, (c.octave - MIDI_0KEY_OCTAVE)*KEY_AMOUNT + c.key);
+        ail_buf_write1(&buffer, (c.octave - MIDI_0KEY_OCTAVE)*PIANO_KEY_AMOUNT + c.key);
         ail_buf_write1(&buffer, c.time);
     }
 
@@ -357,18 +390,5 @@ void writeMidi(Song song, char *fpath)
     ail_buf_to_file(&buffer, fpath);
 }
 
-int main(void)
-{
-    Song song = parseMidi("../midis/A Couple Notes.mid");
-
-    char *keyStrs[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    printf("{\n  name: %s\n  len: %lldms\n  chunks: [\n", song.name, song.len);
-    for (u32 i = 0; i < song.chunks.len; i++) {
-        MusicChunk c = song.chunks.data[i];
-        printf("    { key: %2s, octave: %2d, on: %c, time: %lld, len: %d }\n", keyStrs[c.key], c.octave, c.on ? 'y' : 'n', c.time, c.len);
-    }
-    printf("  ]\n}\n");
-
-    writeMidi(song, "../midis/test.mid");
-    return 0;
-}
+#endif // _MIDI_IMPL_GUARD_
+#endif // MIDI_IMPL
