@@ -37,6 +37,7 @@ typedef struct {
 AIL_DA_INIT(MusicChunk);
 
 typedef struct {
+    char *fname; // Filename that saves the data to this song
     char *name;  // Name of the Song, that is shown in the UI
     u64   len;   // Length in milliseconds of the entire Song
     AIL_DA(MusicChunk) chunks;

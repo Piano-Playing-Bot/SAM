@@ -2,11 +2,12 @@
 // Includes //
 //////////////
 
+#include "raylib.h"  // For immediate UI framework
 #include <stdbool.h> // For boolean definitions
 #include <string.h>  // For memcpy
-#include "raylib.h"  // For immediate UI framework
 #include <pthread.h> // For threads and mutexes
 #include <unistd.h>  // For sleep @Cleanup
+#include "math.h"    // For sinf, cosf
 #include "common.h"
 #define MIDI_IMPL
 #include "midi.h"
@@ -23,64 +24,68 @@
 
 // PIDI = Piano Digital Interface
 // PDIL = PIDI-Library
-
 u32 PIDI_MAGIC = ('P' << 24) | ('I' << 16) | ('D' << 8) | ('I' << 0);
 u32 PDIL_MAGIC = ('P' << 24) | ('D' << 16) | ('I' << 8) | ('L' << 0);
 
+const char *data_dir_path    = "/data/";
+const char *library_filepath = "/data/library.pdil";
+
+#define FPS 60
+
 typedef enum {
-    UI_VIEW_START,
-    UI_VIEW_FILE,
+    UI_VIEW_LIBRARY,
+    UI_VIEW_ADD,
+    UI_VIEW_PARSING_SONG,
 } UI_View;
 
-void print_song(Song song);
-void *loadLibrary(void *arg);
-void *parseFile(void *_filePath);
+void  print_song(Song song);
+bool  save_pidi(Song song);
+bool  save_library();
+void *load_library(void *arg);
+void *parse_file(void *_filePath);
 void *util_memadd(const void *a, u64 a_size, const void *b, u64 b_size);
 
 
 #define SWITCH_CTX_THREADSAFE(allocator)      do { pthread_mutex_lock(&allocCtxMutex); AIL_ALLOC_SWITCH_CTX(allocator);      pthread_mutex_unlock(&allocCtxMutex); } while(0)
 #define SWITCH_BACK_CTX_THREADSAFE(allocator) do { pthread_mutex_lock(&allocCtxMutex); AIL_ALLOC_SWITCH_BACK_CTX(allocator); pthread_mutex_unlock(&allocCtxMutex); } while(0)
 pthread_mutex_t allocCtxMutex = PTHREAD_MUTEX_INITIALIZER;
-AIL_Alloc_Allocator frameArena;
+AIL_Alloc_Allocator frame_arena;
 AIL_Alloc_Allocator uiStrArena;
 
-// These variables are all accessed by main and parseFile (and the functions called by parseFile)
-static bool fileParsed;
-static Song song;
-static char *errMsg;
+// These variables are all accessed by main and parse_file (and the functions called by parse_file)
+static bool file_parsed;
+static char *err_msg;
 
-// These variables are all accessed by main and loadLibrary
+// These variables are all accessed by main and load_library
 AIL_DA(Song) library;
-bool libraryReady = false;
+bool library_ready = false;
 
 
-UI_View view       = UI_VIEW_START;
-char *startViewMsg = "Drag-and-Drop a MIDI-File to play it on the Piano";
-AIL_Gui_Label label    = {0};
+UI_View view = UI_VIEW_LIBRARY;
 
 
 int main(void)
 {
-    frameArena = ail_alloc_arena_init(ail_alloc_std, 32*1024, true);
+    frame_arena = ail_alloc_arena_init(ail_alloc_std, 32*1024, true);
     uiStrArena = ail_alloc_arena_init(ail_alloc_std,  1*1024, false);
-    AIL_ALLOC_SWITCH_CTX(frameArena);
+    AIL_ALLOC_SWITCH_CTX(frame_arena);
 
-    i32 winWidth  = 1200;
-    i32 winHeight = 600;
+    i32 win_width  = 1200;
+    i32 win_height = 600;
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(winWidth, winHeight, "Piano Player");
-    SetTargetFPS(60);
+    InitWindow(win_width, win_height, "Piano Player");
+    SetTargetFPS(FPS);
 
-    char *filePath     = NULL;
+    char *file_path     = NULL;
     pthread_t fileParsingThread;
     pthread_t loadLibraryThread;
 
-    pthread_create(&loadLibraryThread, NULL, loadLibrary, NULL);
+    pthread_create(&loadLibraryThread, NULL, load_library, NULL);
 
-    float size_default = 50;
-    float size_max     = size_default;
+    f32 size_smaller = 35;
+    f32 size_default = 50;
+    f32 size_max     = size_default;
     Font font = LoadFontEx("./assets/Roboto-Regular.ttf", size_max, NULL, 95);
-
     AIL_Gui_Style style_default = {
         .color        = WHITE,
         .bg           = BLANK,
@@ -94,68 +99,167 @@ int main(void)
         .hAlign       = AIL_GUI_ALIGN_C,
         .vAlign       = AIL_GUI_ALIGN_C,
     };
+    AIL_Gui_Style style_default_lt = ail_gui_cloneStyle(style_default);
+    style_default_lt.hAlign = AIL_GUI_ALIGN_LT;
+    style_default_lt.vAlign = AIL_GUI_ALIGN_LT;
+    AIL_Gui_Style style_button_default = {
+        .color        = WHITE,
+        .bg           = (Color){42, 230, 37, 255},
+        .border_color = (Color){ 9, 170,  6, 255},
+        .border_width = 5,
+        .font         = font,
+        .font_size    = size_default,
+        .cSpacing     = 2,
+        .lSpacing     = 5,
+        .pad          = 15,
+        .hAlign       = AIL_GUI_ALIGN_C,
+        .vAlign       = AIL_GUI_ALIGN_C,
+    };
+    AIL_Gui_Style style_button_hover = ail_gui_cloneStyle(style_button_default);
+    style_button_hover.border_color = BLACK;
+    AIL_Gui_Style style_song_name_default = {
+        .color        = WHITE,
+        .bg           = LIGHTGRAY,
+        .border_color = GRAY,
+        .font         = font,
+        .border_width = 5,
+        .font_size    = size_smaller,
+        .cSpacing     = 2,
+        .lSpacing     = 5,
+        .pad          = 15,
+        .hAlign       = AIL_GUI_ALIGN_LT,
+        .vAlign       = AIL_GUI_ALIGN_LT,
+    };
+    AIL_Gui_Style style_song_name_hover = ail_gui_cloneStyle(style_song_name_default);
+    style_song_name_hover.bg = GRAY;
 
-    label = (AIL_Gui_Label) {
-        .text = ail_da_from_parts(char, startViewMsg, strlen(startViewMsg), strlen(startViewMsg)),
-        .bounds = (Rectangle){ .x = 0, .y = 0, .width = winWidth, .height = winHeight },
+    Rectangle header_bounds, content_bounds;
+    AIL_Gui_Label centered_label = {
+        .text         = ail_da_new_empty(char),
         .defaultStyle = style_default,
-        .hovered = style_default,
+        .hovered      = style_default,
+    };
+    char *library_label_msg = "Library:";
+    AIL_Gui_Label library_label = {
+        .text         = ail_da_from_parts(char, library_label_msg, strlen(library_label_msg), strlen(library_label_msg)),
+        .defaultStyle = style_default_lt,
+        .hovered      = style_default_lt,
+    };
+    char *upload_btn_msg = "Add";
+    AIL_Gui_Label upload_button = {
+        .text         = ail_da_from_parts(char, upload_btn_msg, strlen(upload_btn_msg), strlen(upload_btn_msg)),
+        .defaultStyle = style_button_default,
+        .hovered      = style_button_hover,
     };
 
+#define SET_VIEW(v) do { view = (v); view_changed = true; } while(0)
+    bool is_first_frame = true;
+    bool view_changed   = false;
     while (!WindowShouldClose()) {
         BeginDrawing();
 
-        bool isResized = IsWindowResized();
-        if (isResized) {
-            winWidth  = GetScreenWidth();
-            winHeight = GetScreenHeight();
-            label.bounds.width  = winWidth;
-            label.bounds.height = winHeight;
+        bool is_resized = IsWindowResized() || is_first_frame;
+        is_first_frame = false;
+        if (is_resized) {
+            win_width  = GetScreenWidth();
+            win_height = GetScreenHeight();
+            u32 header_pad = 5;
+            header_bounds  = (Rectangle) { header_pad, 0, win_width - 2*header_pad, AIL_CLAMP(win_height / 10, size_max + 30, size_max*2) };
+            content_bounds = (Rectangle) { header_bounds.x, header_bounds.y + header_bounds.height, header_bounds.width, win_height - header_bounds.y - header_bounds.height };
         }
         ClearBackground(BLACK);
+        SetMouseCursor(MOUSE_CURSOR_DEFAULT);
 
         switch(view) {
-            case UI_VIEW_START: {
-                if (!libraryReady) {
-                    label.text.data = "Loading Libary...";
-                    ail_gui_drawLabel(label);
+            case UI_VIEW_LIBRARY: {
+                if (is_resized || view_changed) {
+                    centered_label.bounds = (Rectangle){0, 0, win_width, win_height};
+                    library_label.bounds  = header_bounds;
+                    u32     upload_margin   = 5;
+                    Vector2 upload_txt_size = MeasureTextEx(upload_button.defaultStyle.font, upload_button.text.data, upload_button.defaultStyle.font_size, upload_button.defaultStyle.cSpacing);
+                    upload_button.bounds.y      = header_bounds.y + upload_margin + upload_button.defaultStyle.border_width;
+                    upload_button.bounds.height = header_bounds.height - upload_button.bounds.y - upload_button.defaultStyle.border_width - upload_margin;
+                    upload_button.bounds.width  = upload_button.defaultStyle.border_width*2 + upload_button.defaultStyle.pad*2 + upload_txt_size.x;
+                    upload_button.bounds.x      = header_bounds.x + header_bounds.width - upload_margin - upload_button.bounds.width;
+                }
+                if (!library_ready) {
+                    char *loading_lib_text = "Loading Libary...";
+                    centered_label.text    = ail_da_from_parts(char, loading_lib_text, strlen(loading_lib_text), strlen(loading_lib_text));
+                    ail_gui_drawLabel(centered_label);
                 }
                 else {
-                    ail_gui_drawLabel(label);
-                    if (IsFileDropped()) {
-                        FilePathList droppedFiles = LoadDroppedFiles();
-                        if (droppedFiles.count > 1 || !IsPathFile(droppedFiles.paths[0])) {
-                            label.text.data = "You can only drag and drop one MIDI-File to play it on the Piano.\nPlease try again";
-                        } else {
-                            view = UI_VIEW_FILE;
-                            u64 pathLen = strlen(droppedFiles.paths[0]);
-                            filePath    = malloc(sizeof(char) * (pathLen + 1));
-                            memcpy(filePath, droppedFiles.paths[0], pathLen + 1);
-                            label.text.data  = filePath;
-                            pthread_create(&fileParsingThread, NULL, parseFile, (void *)filePath);
-                        }
-                        UnloadDroppedFiles(droppedFiles);
+                    DrawRectangle(header_bounds.x, header_bounds.y, header_bounds.width, header_bounds.height, LIGHTGRAY);
+                    AIL_Gui_Drawable_Text library_label_drawable = ail_gui_prepTextForDrawing(library_label.text.data, library_label.bounds, library_label.defaultStyle);
+                    ail_gui_drawPreparedSized(library_label_drawable, library_label.bounds, library_label.defaultStyle);
+
+                    AIL_Gui_State upload_button_state = ail_gui_drawLabel(upload_button);
+                    if (upload_button_state >= AIL_GUI_STATE_HOVERED) SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+                    if (upload_button_state == AIL_GUI_STATE_PRESSED) SET_VIEW(UI_VIEW_ADD);
+
+                    // @TODO: Allow scrolling
+                    // @TODO: Add search bar
+                    static const u32 song_name_width  = 200;
+                    static const u32 song_name_margin = 50;
+                    u32 song_names_per_row = (win_width -  2*song_name_margin) / (song_name_width + song_name_margin + 2*style_song_name_default.pad);
+                    Rectangle song_bounds = { content_bounds.x + song_name_margin, content_bounds.y + song_name_margin, 100, 100 };
+                    for (u32 i = 0; i < library.len; i++) {
+                        char *song_name = library.data[i].name;
+                        AIL_Gui_Label song_label = {
+                            .text         = ail_da_from_parts(char, song_name, strlen(song_name), strlen(song_name)),
+                            .bounds       = song_bounds,
+                            .defaultStyle = style_song_name_default,
+                            .hovered      = style_song_name_hover,
+                        };
+                        ail_gui_drawLabel(song_label);
                     }
                 }
             } break;
 
-            case UI_VIEW_FILE: {
-                // @TODO: Animate a loading animation
-                static bool wasFileParsedBefore = false;
-                if (fileParsed) {
-                    if (!wasFileParsedBefore) print_song(song);
-                    ail_gui_drawSized("Success!!!", (Rectangle){0, 0, winWidth, winHeight}, style_default);
-                    wasFileParsedBefore = true;
-                } else {
-                    ail_gui_drawSized("Loading...", (Rectangle){0, 0, winWidth, winHeight}, style_default);
+            case UI_VIEW_ADD: {
+                char *add_view_msg  = "Drag-and-Drop a MIDI-File to play it on the Piano";
+                centered_label.text = ail_da_from_parts(char, add_view_msg, strlen(add_view_msg), strlen(add_view_msg));
+
+                ail_gui_drawLabel(centered_label);
+                if (IsFileDropped()) {
+                    FilePathList dropped_files = LoadDroppedFiles();
+                    if (dropped_files.count > 1 || !IsPathFile(dropped_files.paths[0])) {
+                        centered_label.text.data = "You can only drag and drop one MIDI-File to play it on the Piano.\nPlease try again";
+                    } else {
+                        SET_VIEW(UI_VIEW_PARSING_SONG);
+                        u64 pathLen = strlen(dropped_files.paths[0]);
+                        file_path    = malloc(sizeof(char) * (pathLen + 1));
+                        memcpy(file_path, dropped_files.paths[0], pathLen + 1);
+                        centered_label.text.data  = file_path;
+                        pthread_create(&fileParsingThread, NULL, parse_file, (void *)file_path);
+                    }
+                    UnloadDroppedFiles(dropped_files);
                 }
+            } break;
+
+            case UI_VIEW_PARSING_SONG: {
+                static       u32 parsing_song_anim_idx             = 0;
+                static const u32 parsing_song_anim_len             = FPS;
+                static const u8  parsing_song_anim_circle_count    = 12;
+                static const f32 parsing_song_anim_circle_radius   = 20;
+                static const f32 parsing_song_anim_circle_distance = 100;
+                u8 parsing_song_cur_song = (u8)(((f32) parsing_song_anim_circle_count * parsing_song_anim_idx) / (f32)parsing_song_anim_len);
+                for (u8 i = 0; i < parsing_song_anim_circle_count; i++) {
+                    f32 i_perc = i / (f32)parsing_song_anim_circle_count;
+                    u32 x      = win_width/2  + parsing_song_anim_circle_distance*cosf(2*PI*i_perc);
+                    u32 y      = win_height/2 + parsing_song_anim_circle_distance*sinf(2*PI*i_perc);
+                    f32 delta  = (i + parsing_song_anim_circle_count - parsing_song_cur_song) / (f32)parsing_song_anim_circle_count;
+                    Color col = {0xff, 0xff, 0xff, 0xff*delta};
+                    DrawCircle(x, y, parsing_song_anim_circle_radius, col);
+                }
+                parsing_song_anim_idx = (parsing_song_anim_idx + 1) % parsing_song_anim_len;
+
+                if (file_parsed) SET_VIEW(UI_VIEW_LIBRARY);
             } break;
         }
 
-        DrawFPS(10, 10);
-        SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+        DrawFPS(win_width - 90, 10);
         EndDrawing();
-        ail_alloc_arena_free_all(frameArena.data);
+        ail_alloc_arena_free_all(frame_arena.data);
     }
 
     CloseWindow();
@@ -164,11 +268,11 @@ int main(void)
 
 void print_song(Song song)
 {
-    char *keyStrs[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    char *key_strs[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     printf("{\n  name: %s\n  len: %lldms\n  chunks: [\n", song.name, song.len);
     for (u32 i = 0; i < song.chunks.len; i++) {
         MusicChunk c = song.chunks.data[i];
-        printf("    { key: %2s, octave: %2d, on: %c, time: %lld, len: %d }\n", keyStrs[c.key], c.octave, c.on ? 'y' : 'n', c.time, c.len);
+        printf("    { key: %2s, octave: %2d, on: %c, time: %lld, len: %d }\n", key_strs[c.key], c.octave, c.on ? 'y' : 'n', c.time, c.len);
     }
     printf("  ]\n}\n");
 }
@@ -183,54 +287,98 @@ void* util_memadd(const void *a, u64 a_size, const void *b, u64 b_size)
 	return (void*) out;
 }
 
-void *loadLibrary(void *arg)
+bool save_pidi(Song song)
+{
+    AIL_Buffer buf = ail_buf_new(1024);
+    ail_buf_write8msb(&buf, PIDI_MAGIC);
+    ail_buf_write4lsb(&buf, song.chunks.len);
+    for (u32 i = 0; i < song.chunks.len; i++) {
+        MusicChunk chunk = song.chunks.data[i];
+        ail_buf_write8lsb(&buf, chunk.time);
+        ail_buf_write2lsb(&buf, chunk.len);
+        ail_buf_write1   (&buf, chunk.key);
+        ail_buf_write1   (&buf, (u8) chunk.octave);
+        ail_buf_write1   (&buf, (u8) chunk.on);
+    }
+    return ail_buf_to_file(&buf, song.fname);
+}
+
+bool save_library()
+{
+    AIL_Buffer buf = ail_buf_new(1024);
+    ail_buf_write8msb(&buf, PDIL_MAGIC);
+    ail_buf_write4lsb(&buf, library.len);
+    for (u32 i = 0; i < library.len; i++) {
+        Song song = library.data[i];
+        u32 name_len  = strlen(song.name);
+        u32 fname_len = strlen(song.fname);
+        ail_buf_write4lsb(&buf, name_len);
+        ail_buf_write4lsb(&buf, fname_len);
+        ail_buf_write8lsb(&buf, song.len);
+        ail_buf_writestr(&buf, song.name, name_len);
+        ail_buf_writestr(&buf, song.fname, fname_len);
+    }
+    if (!DirectoryExists(data_dir_path)) mkdir(data_dir_path);
+    return ail_buf_to_file(&buf, library_filepath);
+}
+
+void *load_library(void *arg)
 {
     (void)arg;
     library = ail_da_new(Song);
-    SWITCH_CTX_THREADSAFE(ail_alloc_std);
-    const char *dataDir = "./data/";
-    const char *libraryFilename = "lib.pdil";
-    char *libraryFilepath = util_memadd(dataDir, strlen(dataDir), libraryFilename, strlen(libraryFilename) + 1);
-    SWITCH_BACK_CTX_THREADSAFE();
-
-    if (!DirectoryExists(dataDir)) {
-        mkdir(dataDir);
+    if (!DirectoryExists(data_dir_path)) {
+        mkdir(data_dir_path);
         goto nothing_to_load;
     }
     else {
-        if (!FileExists(libraryFilepath)) goto nothing_to_load;
-        AIL_Buffer buf = ail_buf_from_file(libraryFilepath);
+        if (!FileExists(library_filepath)) goto nothing_to_load;
+        AIL_Buffer buf = ail_buf_from_file(library_filepath);
         if (ail_buf_read8msb(&buf) != PDIL_MAGIC) goto nothing_to_load;
         u32 n = ail_buf_read4lsb(&buf);
-        library.cap = n;
+        ail_da_maybe_grow(&library, n);
         for (; n > 0; n--) {
-            u32 nameLen  = ail_buf_read4lsb(&buf);
-            u32 fnameLen = ail_buf_read4lsb(&buf);
-            (void)fnameLen;
-            (void)nameLen;
-            SWITCH_CTX_THREADSAFE(ail_alloc_std);
-
-            SWITCH_BACK_CTX_THREADSAFE();
+            u32 name_len  = ail_buf_read4lsb(&buf);
+            u32 fname_len = ail_buf_read4lsb(&buf);
+            u64 len       = ail_buf_read8lsb(&buf);
+            char *name  = ail_buf_readstr(&buf, name_len);
+            char *fname = ail_buf_readstr(&buf, fname_len);
+            Song song = {
+                .fname  = fname,
+                .name   = name,
+                .len    = len,
+                .chunks = ail_da_new_empty(MusicChunk),
+            };
+            ail_da_push(&library, song);
         }
         goto end;
     }
 
 nothing_to_load:
-    library.cap = 16;
-    libraryReady = true;
+    ail_da_maybe_grow(&library, 16);
 end:
-    SWITCH_CTX_THREADSAFE(ail_alloc_std);
-    free(libraryFilepath);
-    SWITCH_BACK_CTX_THREADSAFE();
+    library_ready = true;
     return NULL;
 }
 
-void *parseFile(void *_filePath)
+void *parse_file(void *_filePath)
 {
-    ParseMidiRes res = parseMidi((char *)_filePath);
-    errMsg = NULL;
-    if (res.succ) song = res.val.song;
-    else errMsg = res.val.err;
-    fileParsed = true;
+    ParseMidiRes res = parse_midi((char *)_filePath);
+    err_msg = NULL;
+    if (res.succ) {
+        static const char *ext   = ".pidi";
+        static const u64 ext_len = 5;
+        u32 name_len = strlen(res.val.song.name);
+        char *fname  = malloc(name_len + ext_len + 1);
+        memcpy(fname, res.val.song.name, name_len);
+        memcpy(&fname[name_len], ext, ext_len + 1);
+        res.val.song.fname = fname;
+        // @TODO: What if file with that name already exists?
+
+        ail_da_push(&library, res.val.song);
+        AIL_ASSERT(save_pidi(res.val.song));
+        AIL_ASSERT(save_library());
+    }
+    else err_msg = res.val.err;
+    file_parsed = true;
     return NULL;
 }

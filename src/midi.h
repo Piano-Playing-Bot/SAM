@@ -38,9 +38,9 @@ typedef struct { // See definition in Spec
     i8 mi;
 } MIDI_Key_Signature;
 
-u32 readVarLen(AIL_Buffer *buffer);
-ParseMidiRes parseMidi(char *filePath);
-void writeMidi(Song song, char *fpath);
+u32 read_var_len(AIL_Buffer *buffer);
+ParseMidiRes parse_midi(char *filePath);
+void write_midi(Song song, char *fpath);
 
 #endif // MIDI_H_
 
@@ -56,7 +56,7 @@ void writeMidi(Song song, char *fpath);
 #endif
 
 // Code taken from MIDI Standard
-u32 readVarLen(AIL_Buffer *buffer)
+u32 read_var_len(AIL_Buffer *buffer)
 {
     u32 value;
     u8 c;
@@ -68,7 +68,7 @@ u32 readVarLen(AIL_Buffer *buffer)
     return value;
 }
 
-ParseMidiRes parseMidi(char *filePath)
+ParseMidiRes parse_midi(char *filePath)
 {
     ParseMidiResVal val = {0};
     i32   pathLen  = strlen(filePath);
@@ -105,13 +105,13 @@ ParseMidiRes parseMidi(char *filePath)
     buffer.idx += midiFileStartLen;
 
     u32 tempo = 500000; // in ms. 500000ms = 120BPM (default value)
-    MIDI_Time_Signature timeSignature = { // Initialized to 4/4
+    MIDI_Time_Signature time_signature = { // Initialized to 4/4
         .num = 4,
         .den = 2,
         .clocks = 18,
         .b = 8,
     };
-    MIDI_Key_Signature keySignature = {0};
+    MIDI_Key_Signature key_signature = {0};
 
     u16 format   = ail_buf_read2msb(&buffer);
     u16 ntrcks   = ail_buf_read2msb(&buffer);
@@ -134,14 +134,14 @@ ParseMidiRes parseMidi(char *filePath)
         // Parse track chunks
         u64 ticks  = 0; // Amount of ticks of the virtual midi clock
         AIL_ASSERT(ail_buf_read4msb(&buffer) == 0x4D54726B);
-        u32 chunkLen   = ail_buf_read4msb(&buffer);
-        u32 chunkEnd   = buffer.idx + chunkLen;
-        dbg_log("Parsing chunk from %#010llx to %#010x\n", buffer.idx, chunkEnd);
-        while (buffer.idx < chunkEnd) {
+        u32 chunk_len   = ail_buf_read4msb(&buffer);
+        u32 chunk_end   = buffer.idx + chunk_len;
+        dbg_log("Parsing chunk from %#010llx to %#010x\n", buffer.idx, chunk_end);
+        while (buffer.idx < chunk_end) {
             // Parse MTrk events
-            u32 deltaTime = readVarLen(&buffer);
-            dbg_log("deltaTime: %d\n", deltaTime);
-            ticks += deltaTime;
+            u32 delta_time = read_var_len(&buffer);
+            dbg_log("delta_time: %d\n", delta_time);
+            ticks += delta_time;
             if (ail_buf_peek1(buffer) == 0xff) {
                 buffer.idx++;
                 // Meta Event
@@ -156,7 +156,7 @@ ParseMidiRes parseMidi(char *filePath)
                         AIL_TODO();
                     } break;
                     case 0x03: { // Sequence/Track Name - ignored
-                        u32 len = readVarLen(&buffer);
+                        u32 len = read_var_len(&buffer);
                         buffer.idx += len;
                     } break;
                     case 0x04: {
@@ -177,7 +177,7 @@ ParseMidiRes parseMidi(char *filePath)
                     case 0x2f: {
                         // End of Track
                         AIL_ASSERT(ail_buf_read1(&buffer) == 0);
-                        AIL_ASSERT(buffer.idx == chunkEnd);
+                        AIL_ASSERT(buffer.idx == chunk_end);
                     } break;
                     case 0x51: {
                         // @TODO: This is a change of tempo and should thus be recorded for the track somehow
@@ -190,21 +190,21 @@ ParseMidiRes parseMidi(char *filePath)
                     } break;
                     case 0x58: { // Time Signature - important
                         AIL_ASSERT(ail_buf_read1(&buffer) == 4);
-                        timeSignature = (MIDI_Time_Signature) {
+                        time_signature = (MIDI_Time_Signature) {
                             .num    = ail_buf_read1(&buffer),
                             .den    = ail_buf_read1(&buffer),
                             .clocks = ail_buf_read1(&buffer),
                             .b      = ail_buf_read1(&buffer),
                         };
-                        dbg_log("timeSignature: (%d, %d, %d, %d)\n", timeSignature.num, timeSignature.den, timeSignature.clocks, timeSignature.b);
+                        dbg_log("time_signature: (%d, %d, %d, %d)\n", time_signature.num, time_signature.den, time_signature.clocks, time_signature.b);
                     } break;
                     case 0x59: {
                         AIL_ASSERT(ail_buf_read1(&buffer) == 2);
-                        keySignature = (MIDI_Key_Signature) {
+                        key_signature = (MIDI_Key_Signature) {
                             .sf = (i8) ail_buf_read1(&buffer),
                             .mi = (i8) ail_buf_read1(&buffer),
                         };
-                        dbg_log("keySignature: (%d, %d)\n", keySignature.sf, keySignature.mi);
+                        dbg_log("key_signature: (%d, %d)\n", key_signature.sf, key_signature.mi);
                     } break;
                     case 0x7f: {
                         AIL_TODO();
@@ -241,8 +241,8 @@ ParseMidiRes parseMidi(char *filePath)
                             .octave = MIDI_0KEY_OCTAVE + (key / PIANO_KEY_AMOUNT),
                             .on     = command == 0x9 && velocity != 0,
                         };
-                        u64 chunkEnd = chunk.time + chunk.len;
-                        if (AIL_LIKELY(chunkEnd > val.song.len)) val.song.len = chunkEnd;
+                        u64 chunk_end = chunk.time + chunk.len;
+                        if (AIL_LIKELY(chunk_end > val.song.len)) val.song.len = chunk_end;
                         ail_da_push(&val.song.chunks, chunk);
                     } break;
                     case 0xA: {
@@ -315,7 +315,7 @@ ParseMidiRes parseMidi(char *filePath)
     return (ParseMidiRes) { true, val };
 }
 
-void writeMidi(Song song, char *fpath)
+void write_midi(Song song, char *fpath)
 {
     AIL_Buffer buffer = ail_buf_new(2048);
     ail_buf_write1(&buffer, 'M');
@@ -334,15 +334,15 @@ void writeMidi(Song song, char *fpath)
     u64 len_idx = buffer.idx;
     buffer.idx += 4;
 
-    ail_buf_write3msb(&buffer, 0x00ff03); // deltaTime + Status for name
+    ail_buf_write3msb(&buffer, 0x00ff03); // delta_time + Status for name
     ail_buf_write1(&buffer, strlen(song.name));
     for (u8 i = 0; i < (u8)strlen(song.name); i++) ail_buf_write1(&buffer, song.name[i]);
 
-    ail_buf_write3msb(&buffer, 0x00ff58); // deltaTime + Status for Time-Signature
+    ail_buf_write3msb(&buffer, 0x00ff58); // delta_time + Status for Time-Signature
     ail_buf_write1(&buffer, 4);
     ail_buf_write4msb(&buffer, 0x04021808); // Time-Signature
 
-    ail_buf_write3msb(&buffer, 0x00ff59); // deltaTime + Status for Key-Signature
+    ail_buf_write3msb(&buffer, 0x00ff59); // delta_time + Status for Key-Signature
     ail_buf_write3msb(&buffer, 0x020000); // len + Key-Signature
 
     // Tempo
