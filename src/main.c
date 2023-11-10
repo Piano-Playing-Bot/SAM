@@ -199,9 +199,13 @@ int main(void)
                     // @TODO: Allow scrolling
                     // @TODO: Add search bar
                     static const u32 song_name_width  = 200;
+                    static const u32 song_name_height = 150;
                     static const u32 song_name_margin = 50;
-                    u32 song_names_per_row = (win_width -  2*song_name_margin) / (song_name_width + song_name_margin + 2*style_song_name_default.pad);
-                    Rectangle song_bounds = { content_bounds.x + song_name_margin, content_bounds.y + song_name_margin, 100, 100 };
+                    u32 full_song_name_width = song_name_width + 2*style_song_name_default.pad + 2*style_song_name_default.border_width;
+                    u32 song_names_per_row   = (content_bounds.width + song_name_margin) / (song_name_margin + full_song_name_width);
+                    u32 full_width           = song_names_per_row*full_song_name_width + (song_names_per_row - 1)*song_name_margin;
+                    u32 start_x              = (content_bounds.width - full_width) / 2;
+                    Rectangle song_bounds = { start_x, content_bounds.y + song_name_margin, song_name_width, song_name_height };
                     for (u32 i = 0; i < library.len; i++) {
                         char *song_name = library.data[i].name;
                         AIL_Gui_Label song_label = {
@@ -211,6 +215,13 @@ int main(void)
                             .hovered      = style_song_name_hover,
                         };
                         ail_gui_drawLabel(song_label);
+                        if ((i + 1) % song_names_per_row == 0) {
+                            song_bounds.x  = start_x;
+                            song_bounds.y += song_name_height + song_name_margin;
+                            if (song_bounds.y > content_bounds.y + content_bounds.height) break;
+                        } else {
+                            song_bounds.x += full_song_name_width + song_name_margin;
+                        }
                     }
                 }
             } break;
@@ -365,20 +376,25 @@ void *parse_file(void *_filePath)
     ParseMidiRes res = parse_midi((char *)_filePath);
     err_msg = NULL;
     if (res.succ) {
+        print_song(res.val.song);
         static const char *ext   = ".pidi";
         static const u64 ext_len = 5;
         u32 name_len = strlen(res.val.song.name);
         char *fname  = malloc(name_len + ext_len + 1);
         memcpy(fname, res.val.song.name, name_len);
         memcpy(&fname[name_len], ext, ext_len + 1);
+        printf("fname: %s\n", fname);
         res.val.song.fname = fname;
         // @TODO: What if file with that name already exists?
 
         ail_da_push(&library, res.val.song);
-        AIL_ASSERT(save_pidi(res.val.song));
-        AIL_ASSERT(save_library());
+        if (!save_pidi(res.val.song)) AIL_TODO();
+        if (!save_library()) AIL_TODO();
     }
-    else err_msg = res.val.err;
+    else {
+        printf("error in parsing: %s\n", res.val.err);
+        err_msg = res.val.err;
+    }
     file_parsed = true;
     return NULL;
 }
