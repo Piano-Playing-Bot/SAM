@@ -213,9 +213,9 @@ int main(void)
                     u32 rows_amount           = (library.len / song_names_per_row) + ((library.len % song_names_per_row) > 0);
                     u32 full_width            = song_names_per_row*full_song_name_width + (song_names_per_row - 1)*song_name_margin;
                     u32 start_x               = (content_bounds.width - full_width) / 2;
-                    u32 virtual_height        = rows_amount*full_song_name_height + (rows_amount - 1)*song_name_margin;
-                    u32 max_y                 = (virtual_height > content_bounds.height) ? virtual_height - content_bounds.height : 0;
-                    scroll = AIL_MAX(scroll, ((f32) max_y));
+                    u32 virtual_height        = rows_amount*(full_song_name_height + song_name_margin);
+                    f32 max_y                 = (virtual_height > content_bounds.height) ? virtual_height - content_bounds.height : 0;
+                    scroll = AIL_MIN(scroll, max_y);
                     u32 start_row             = scroll / (full_song_name_height + song_name_margin);
 
                     for (u32 i = start_row * song_names_per_row; i < library.len; i++) {
