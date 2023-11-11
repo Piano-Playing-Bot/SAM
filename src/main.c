@@ -57,6 +57,7 @@ static bool file_parsed;
 static char *err_msg;
 
 // These variables are all accessed by main and load_library
+// @TODO: Make library into a Trie to simplify search & prevent duplicates
 AIL_DA(Song) library;
 bool library_ready = false;
 
@@ -170,6 +171,12 @@ int main(void)
         ClearBackground(BLACK);
         SetMouseCursor(MOUSE_CURSOR_DEFAULT);
 
+        static f32 scroll = 0;
+        if (view_changed) scroll = 0.0f;
+        f32 scroll_delta = -GetMouseWheelMove();
+        scroll += scroll_delta;
+        if (AIL_UNLIKELY(scroll < 0.0f)) scroll = 0.0f;
+
         switch(view) {
             case UI_VIEW_LIBRARY: {
                 if (is_resized || view_changed) {
@@ -193,7 +200,6 @@ int main(void)
                     ail_gui_drawPreparedSized(library_label_drawable, library_label.bounds, library_label.defaultStyle);
 
                     AIL_Gui_State upload_button_state = ail_gui_drawLabel(upload_button);
-                    if (upload_button_state >= AIL_GUI_STATE_HOVERED) SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
                     if (upload_button_state == AIL_GUI_STATE_PRESSED) SET_VIEW(UI_VIEW_ADD);
 
                     // @TODO: Allow scrolling
@@ -201,12 +207,24 @@ int main(void)
                     static const u32 song_name_width  = 200;
                     static const u32 song_name_height = 150;
                     static const u32 song_name_margin = 50;
-                    u32 full_song_name_width = song_name_width + 2*style_song_name_default.pad + 2*style_song_name_default.border_width;
-                    u32 song_names_per_row   = (content_bounds.width + song_name_margin) / (song_name_margin + full_song_name_width);
-                    u32 full_width           = song_names_per_row*full_song_name_width + (song_names_per_row - 1)*song_name_margin;
-                    u32 start_x              = (content_bounds.width - full_width) / 2;
-                    Rectangle song_bounds = { start_x, content_bounds.y + song_name_margin, song_name_width, song_name_height };
-                    for (u32 i = 0; i < library.len; i++) {
+                    u32 full_song_name_width  = song_name_width  + 2*style_song_name_default.pad + 2*style_song_name_default.border_width;
+                    u32 full_song_name_height = song_name_height + 2*style_song_name_default.pad + 2*style_song_name_default.border_width;
+                    u32 song_names_per_row    = (content_bounds.width + song_name_margin) / (song_name_margin + full_song_name_width);
+                    u32 rows_amount           = (library.len / song_names_per_row) + ((library.len % song_names_per_row) > 0);
+                    u32 full_width            = song_names_per_row*full_song_name_width + (song_names_per_row - 1)*song_name_margin;
+                    u32 start_x               = (content_bounds.width - full_width) / 2;
+                    u32 virtual_height        = rows_amount*full_song_name_height + (rows_amount - 1)*song_name_margin;
+                    u32 max_y                 = (virtual_height > content_bounds.height) ? virtual_height - content_bounds.height : 0;
+                    scroll = AIL_MAX(scroll, ((f32) max_y));
+                    u32 start_row             = scroll / (full_song_name_height + song_name_margin);
+
+                    for (u32 i = start_row * song_names_per_row; i < library.len; i++) {
+                        Rectangle song_bounds = {
+                            start_x + (full_song_name_width + song_name_margin)*(i % song_names_per_row),
+                            content_bounds.y + song_name_margin + (full_song_name_height + song_name_margin)*(i / song_names_per_row) - scroll,
+                            song_name_width,
+                            song_name_height
+                        };
                         char *song_name = library.data[i].name;
                         AIL_Gui_Label song_label = {
                             .text         = ail_da_from_parts(char, song_name, strlen(song_name), strlen(song_name)),
@@ -214,13 +232,10 @@ int main(void)
                             .defaultStyle = style_song_name_default,
                             .hovered      = style_song_name_hover,
                         };
-                        ail_gui_drawLabel(song_label);
-                        if ((i + 1) % song_names_per_row == 0) {
-                            song_bounds.x  = start_x;
-                            song_bounds.y += song_name_height + song_name_margin;
-                            if (song_bounds.y > content_bounds.y + content_bounds.height) break;
-                        } else {
-                            song_bounds.x += full_song_name_width + song_name_margin;
+                        AIL_Gui_State song_label_state = ail_gui_drawLabelOuterBounds(song_label, content_bounds);
+                        if (song_label_state == AIL_GUI_STATE_PRESSED) {
+                            printf("Playing song: %s\n", song_name);
+                            // @TODO: Send song to arduino & change view
                         }
                     }
                 }
