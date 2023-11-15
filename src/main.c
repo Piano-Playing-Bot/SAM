@@ -40,6 +40,7 @@ typedef enum {
     UI_VIEW_PARSING_SONG, // In the process of uploading a new song
 } UI_View;
 
+AIL_DA(Song) search_songs(const char *substr);
 void draw_loading_anim(u32 win_width, u32 win_height, bool start_new);
 bool is_songname_taken(const char *name);
 void  print_song(Song song);
@@ -64,7 +65,7 @@ static bool file_parsed;
 static char *err_msg;
 
 // These variables are all accessed by main and load_library
-// @TODO: Make library into a Trie to simplify search & prevent duplicates
+// @TODO: Make library into a Trie to simplify search
 AIL_DA(Song) library;
 bool library_ready = false;
 
@@ -140,6 +141,19 @@ int main(void)
     };
     AIL_Gui_Style style_song_name_hover = ail_gui_cloneStyle(style_song_name_default);
     style_song_name_hover.bg = GRAY;
+    AIL_Gui_Style     style_search = {
+        .color        = WHITE,
+        .bg           = BG_COLOR,
+        .border_color = GRAY,
+        .font         = font,
+        .border_width = 5,
+        .font_size    = size_smaller,
+        .cSpacing     = 2,
+        .lSpacing     = 5,
+        .pad          = 15,
+        .hAlign       = AIL_GUI_ALIGN_LT,
+        .vAlign       = AIL_GUI_ALIGN_C,
+    };
 
     Rectangle header_bounds, content_bounds;
     AIL_Gui_Label centered_label = {
@@ -210,12 +224,42 @@ int main(void)
                     ail_gui_drawLabel(centered_label);
                 }
                 else {
-                    DrawRectangle(header_bounds.x, header_bounds.y, header_bounds.width, header_bounds.height, LIGHTGRAY);
-                    AIL_Gui_Drawable_Text library_label_drawable = ail_gui_prepTextForDrawing(library_label.text.data, library_label.bounds, library_label.defaultStyle);
+                    // DrawRectangle(header_bounds.x, header_bounds.y, header_bounds.width, header_bounds.height, LIGHTGRAY);
+                    AIL_Gui_Drawable_Text library_label_drawable;
+                    Vector2 library_label_size = ail_gui_measureText(library_label.text.data, library_label.bounds, library_label.defaultStyle, &library_label_drawable);
                     ail_gui_drawPreparedSized(library_label_drawable, library_label.bounds, library_label.defaultStyle);
 
                     AIL_Gui_State upload_button_state = ail_gui_drawLabel(upload_button);
                     if (upload_button_state == AIL_GUI_STATE_PRESSED) SET_VIEW(UI_VIEW_DND);
+
+                    static char             *search_placeholder = "Search...";
+                    static Rectangle         search_bounds;
+                    static AIL_Gui_Label     search_label;
+                    static AIL_Gui_Input_Box search_input_box;
+
+                    if (requires_recalc) {
+                        u32 search_margin = 15;
+                        u32 search_x      = library_label.bounds.x + library_label_size.x + library_label.defaultStyle.border_width + 2*library_label.defaultStyle.pad + style_search.border_width + search_margin;
+                        search_bounds = (Rectangle) {
+                            search_x,
+                            library_label.bounds.y + style_search.border_width,
+                            upload_button.bounds.x - upload_button.defaultStyle.border_width - search_margin - style_search.border_width - search_x,
+                            library_label.bounds.height - 2*style_search.border_width,
+                        };
+                        search_label     = ail_gui_newLabel(search_bounds, search_label.text.data ? search_label.text.data : "", style_search, style_search);
+                        search_input_box = ail_gui_newInputBox(search_placeholder, false, false, true, search_label);
+                    }
+                    AIL_Gui_Update_Res search_res = ail_gui_drawInputBox(&search_input_box);
+
+                    static bool update_songs = true;
+                    static AIL_DA(Song) songs;
+                    if (search_res.updated) update_songs = true;
+                    if (update_songs) {
+                        ail_da_free(songs);
+                        songs = search_songs(search_input_box.label.text.data);
+                        update_songs = false;
+                    }
+
 
                     // @TODO: Add search bar
                     static const u32 song_name_width  = 200;
@@ -224,7 +268,7 @@ int main(void)
                     u32 full_song_name_width  = song_name_width  + 2*style_song_name_default.pad + 2*style_song_name_default.border_width;
                     u32 full_song_name_height = song_name_height + 2*style_song_name_default.pad + 2*style_song_name_default.border_width;
                     u32 song_names_per_row    = (content_bounds.width + song_name_margin) / (song_name_margin + full_song_name_width);
-                    u32 rows_amount           = (library.len / song_names_per_row) + ((library.len % song_names_per_row) > 0);
+                    u32 rows_amount           = (songs.len / song_names_per_row) + ((songs.len % song_names_per_row) > 0);
                     u32 full_width            = song_names_per_row*full_song_name_width + (song_names_per_row - 1)*song_name_margin;
                     u32 start_x               = (content_bounds.width - full_width) / 2;
                     u32 virtual_height        = rows_amount*(full_song_name_height + song_name_margin);
@@ -232,14 +276,14 @@ int main(void)
                     scroll = AIL_MIN(scroll, max_y);
                     u32 start_row             = scroll / (full_song_name_height + song_name_margin);
 
-                    for (u32 i = start_row * song_names_per_row; i < library.len; i++) {
+                    for (u32 i = start_row * song_names_per_row; i < songs.len; i++) {
                         Rectangle song_bounds = {
                             start_x + (full_song_name_width + song_name_margin)*(i % song_names_per_row),
                             content_bounds.y + song_name_margin + (full_song_name_height + song_name_margin)*(i / song_names_per_row) - scroll,
                             song_name_width,
                             song_name_height
                         };
-                        char *song_name = library.data[i].name;
+                        char *song_name = songs.data[i].name;
                         AIL_Gui_Label song_label = {
                             .text         = ail_da_from_parts(char, song_name, strlen(song_name), strlen(song_name)),
                             .bounds       = song_bounds,
