@@ -39,7 +39,7 @@ typedef struct { // See definition in Spec
 } MIDI_Key_Signature;
 
 u32 read_var_len(AIL_Buffer *buffer);
-ParseMidiRes parse_midi(char *filePath);
+ParseMidiRes parse_midi(AIL_Buffer buffer);
 void write_midi(Song song, char *fpath);
 
 #endif // MIDI_H_
@@ -68,33 +68,9 @@ u32 read_var_len(AIL_Buffer *buffer)
     return value;
 }
 
-ParseMidiRes parse_midi(char *filePath)
+ParseMidiRes parse_midi(AIL_Buffer buffer)
 {
     ParseMidiResVal val = {0};
-    i32   pathLen  = strlen(filePath);
-    char *fileName = filePath;
-    i32   nameLen  = pathLen;
-    for (i32 i = pathLen-2; i > 0; i--) {
-        if (filePath[i] == '/' || (filePath[i] == '\\' && filePath[i+1] != ' ')) {
-            fileName = &filePath[i+1];
-            nameLen  = pathLen - 1 - i;
-            break;
-        }
-    }
-
-    #define EXT_LEN 4
-    if (pathLen < EXT_LEN || memcmp(&filePath[pathLen - EXT_LEN], ".mid", EXT_LEN) != 0) {
-        sprintf(val.err, "%s is not a midi file\n", fileName);
-        return (ParseMidiRes) { false, val };
-    }
-
-    AIL_Buffer buffer = ail_buf_from_file(filePath);
-    // Remove file-ending from filename
-    nameLen -= EXT_LEN;
-    val.song.name = malloc((nameLen + 1) * sizeof(char));
-    memcpy(val.song.name, fileName, nameLen);
-    val.song.name[nameLen] = 0;
-
     #define midiFileStartLen 8
     const char midiFileStart[midiFileStartLen] = {'M', 'T', 'h', 'd', 0, 0, 0, 6};
 
