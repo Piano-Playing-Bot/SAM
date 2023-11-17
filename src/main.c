@@ -66,7 +66,7 @@ static char *err_msg;
 
 // These variables are all accessed by main and load_library
 // @TODO: Make library into a Trie to simplify search
-AIL_DA(Song) library;
+AIL_DA(Song) library = {0};
 bool library_ready = false;
 
 
@@ -251,14 +251,14 @@ int main(void)
                     }
                     AIL_Gui_Update_Res search_res = ail_gui_drawInputBox(&search_input_box);
 
-                    static bool update_songs = true;
+                    static bool update_songs = false;
                     static AIL_DA(Song) songs;
-                    if (search_res.updated) update_songs = true;
+                    if (search_res.updated) update_songs = true && search_input_box.label.text.len;
                     if (update_songs) {
-                        ail_da_free(songs);
+                        ail_da_free(&songs);
                         songs = search_songs(search_input_box.label.text.data);
                         update_songs = false;
-                    }
+                    } else songs = library;
 
 
                     // @TODO: Add search bar
@@ -463,14 +463,14 @@ AIL_DA(Song) search_songs(const char *substr)
         }
     }
     ail_da_pushn(&prefixed, substringed.data, substringed.len);
-    ail_da_free(substringed);
+    ail_da_free(&substringed);
     return prefixed;
 }
 
 bool save_pidi(Song song)
 {
     AIL_Buffer buf = ail_buf_new(1024);
-    ail_buf_write8msb(&buf, PIDI_MAGIC);
+    ail_buf_write4msb(&buf, PIDI_MAGIC);
     ail_buf_write4lsb(&buf, song.chunks.len);
     for (u32 i = 0; i < song.chunks.len; i++) {
         MusicChunk chunk = song.chunks.data[i];
@@ -480,23 +480,29 @@ bool save_pidi(Song song)
         ail_buf_write1   (&buf, (u8) chunk.octave);
         ail_buf_write1   (&buf, (u8) chunk.on);
     }
-    return ail_buf_to_file(&buf, song.fname);
+
+    u64 data_dir_path_len = strlen(data_dir_path);
+    u64 name_len          = strlen(song.name);
+    char *fname = malloc(data_dir_path_len + name_len + 6);
+    memcpy(fname, data_dir_path, data_dir_path_len);
+    memcpy(&fname[data_dir_path_len], song.name, name_len);
+    memcpy(&fname[data_dir_path_len + name_len], ".pidi", 6);
+    bool out = ail_buf_to_file(&buf, fname);
+    free(fname);
+    return out;
 }
 
 bool save_library()
 {
     AIL_Buffer buf = ail_buf_new(1024);
-    ail_buf_write8msb(&buf, PDIL_MAGIC);
+    ail_buf_write4msb(&buf, PDIL_MAGIC);
     ail_buf_write4lsb(&buf, library.len);
     for (u32 i = 0; i < library.len; i++) {
         Song song = library.data[i];
         u32 name_len  = strlen(song.name);
-        u32 fname_len = strlen(song.fname);
         ail_buf_write4lsb(&buf, name_len);
-        ail_buf_write4lsb(&buf, fname_len);
         ail_buf_write8lsb(&buf, song.len);
         ail_buf_writestr(&buf, song.name, name_len);
-        ail_buf_writestr(&buf, song.fname, fname_len);
     }
     if (!DirectoryExists(data_dir_path)) mkdir(data_dir_path);
     return ail_buf_to_file(&buf, library_filepath);
@@ -509,23 +515,20 @@ void *load_library(void *arg)
     if (!DirectoryExists(data_dir_path)) {
         mkdir(data_dir_path);
         goto nothing_to_load;
-    }
-    else {
+    } else {
         if (!FileExists(library_filepath)) goto nothing_to_load;
         AIL_Buffer buf = ail_buf_from_file(library_filepath);
-        if (ail_buf_read8msb(&buf) != PDIL_MAGIC) goto nothing_to_load;
+        if (ail_buf_read4msb(&buf) != PDIL_MAGIC) goto nothing_to_load;
         u32 n = ail_buf_read4lsb(&buf);
+        ail_da_free(&library);
         ail_da_maybe_grow(&library, n);
         for (; n > 0; n--) {
-            u32 name_len  = ail_buf_read4lsb(&buf);
-            u32 fname_len = ail_buf_read4lsb(&buf);
-            u64 len       = ail_buf_read8lsb(&buf);
-            char *name  = ail_buf_readstr(&buf, name_len);
-            char *fname = ail_buf_readstr(&buf, fname_len);
+            u32 name_len = ail_buf_read4lsb(&buf);
+            u64 song_len = ail_buf_read8lsb(&buf);
+            char *name   = ail_buf_readstr(&buf, name_len);
             Song song = {
-                .fname  = fname,
                 .name   = name,
-                .len    = len,
+                .len    = song_len,
                 .chunks = ail_da_new_empty(MusicChunk),
             };
             ail_da_push(&library, song);
@@ -574,13 +577,6 @@ void *parse_file(void *_filepath)
     err_msg = NULL;
     if (res.succ) {
         res.val.song.name = filename;
-        print_song(res.val.song);
-        static const char *ext   = ".pidi";
-        static const u64 ext_len = 5;
-        char *fname  = malloc(name_len + ext_len + 1);
-        memcpy(fname, res.val.song.name, name_len);
-        memcpy(&fname[name_len], ext, ext_len + 1);
-        res.val.song.fname = fname;
         song = res.val.song;
     }
     else {

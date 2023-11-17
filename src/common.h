@@ -4,7 +4,7 @@
 #define AIL_ALL_IMPL
 #include "ail.h"
 
-#define DEBUG
+// #define DEBUG
 
 // @Note on time: The idea is to use discretized clock-cycles for measuring time.
 // The time parameter in MusicChunk represents at which millisecond the chunk should start playing
@@ -37,7 +37,6 @@ typedef struct {
 AIL_DA_INIT(MusicChunk);
 
 typedef struct {
-    char *fname; // Filename that saves the data to this song
     char *name;  // Name of the Song, that is shown in the UI
     u64   len;   // Length in milliseconds of the entire Song
     AIL_DA(MusicChunk) chunks;
