@@ -8,7 +8,6 @@
 #include <pthread.h> // For threads and mutexes
 #include <unistd.h>  // For sleep @Cleanup
 #include "math.h"    // For sinf, cosf
-#include "common.h"
 #define MIDI_IMPL
 #include "midi.h"
 #define AIL_ALL_IMPL
@@ -21,6 +20,7 @@
 #include "ail_buf.h"
 #define AIL_ALLOC_IMPL
 #include "ail_alloc.h"
+#include "common.h"
 
 // PIDI = Piano Digital Interface
 // PDIL = PIDI-Library

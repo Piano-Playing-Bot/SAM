@@ -4,7 +4,7 @@
 #define AIL_ALL_IMPL
 #include "ail.h"
 
-// #define DEBUG
+#define DEBUG
 
 // @Note on time: The idea is to use discretized clock-cycles for measuring time.
 // The time parameter in MusicChunk represents at which millisecond the chunk should start playing

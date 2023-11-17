@@ -116,7 +116,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
         while (buffer.idx < chunk_end) {
             // Parse MTrk events
             u32 delta_time = read_var_len(&buffer);
-            dbg_log("delta_time: %d\n", delta_time);
+            dbg_log("index: %#010llx, delta_time: %d\n", buffer.idx, delta_time);
             ticks += delta_time;
             if (ail_buf_peek1(buffer) == 0xff) {
                 buffer.idx++;
