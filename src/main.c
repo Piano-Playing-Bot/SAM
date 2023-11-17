@@ -55,7 +55,7 @@ void *util_memadd(const void *a, u64 a_size, const void *b, u64 b_size);
 #define SWITCH_BACK_CTX_THREADSAFE(allocator) do { pthread_mutex_lock(&allocCtxMutex); AIL_ALLOC_SWITCH_BACK_CTX(allocator); pthread_mutex_unlock(&allocCtxMutex); } while(0)
 pthread_mutex_t allocCtxMutex = PTHREAD_MUTEX_INITIALIZER;
 AIL_Alloc_Allocator frame_arena;
-AIL_Alloc_Allocator uiStrArena;
+AIL_Alloc_Allocator ui_str_arena;
 
 // These variables are all accessed by main and parse_file (and the functions called by parse_file)
 char *filename;
@@ -75,9 +75,9 @@ UI_View view = UI_VIEW_LIBRARY;
 
 int main(void)
 {
-    frame_arena = ail_alloc_arena_init(ail_alloc_std, 32*1024, true);
-    uiStrArena = ail_alloc_arena_init(ail_alloc_std,  1*1024, false);
-    AIL_ALLOC_SWITCH_CTX(frame_arena);
+    frame_arena  = ail_alloc_arena_init(ail_alloc_std, 32*1024, true);
+    ui_str_arena = ail_alloc_arena_init(ail_alloc_std,  1*1024, false);
+    // AIL_ALLOC_SWITCH_CTX(frame_arena);
 
     i32 win_width  = 1200;
     i32 win_height = 600;
@@ -208,6 +208,7 @@ int main(void)
 
         switch(view) {
             case UI_VIEW_LIBRARY: {
+                static bool loaded_lib_in_prev_frame = false;
                 if (requires_recalc) {
                     centered_label.bounds = (Rectangle){0, 0, win_width, win_height};
                     library_label.bounds  = header_bounds;
@@ -218,10 +219,12 @@ int main(void)
                     upload_button.bounds.width  = upload_button.defaultStyle.border_width*2 + upload_button.defaultStyle.pad*2 + upload_txt_size.x;
                     upload_button.bounds.x      = header_bounds.x + header_bounds.width - upload_margin - upload_button.bounds.width;
                 }
-                if (!library_ready) {
+                if (AIL_UNLIKELY(!library_ready)) {
+                    loaded_lib_in_prev_frame = true;
                     char *loading_lib_text = "Loading Libary...";
                     centered_label.text    = ail_da_from_parts(char, loading_lib_text, strlen(loading_lib_text), strlen(loading_lib_text));
                     ail_gui_drawLabel(centered_label);
+                    SetMouseCursor(MOUSE_CURSOR_DEFAULT);
                 }
                 else {
                     // DrawRectangle(header_bounds.x, header_bounds.y, header_bounds.width, header_bounds.height, LIGHTGRAY);
@@ -237,7 +240,7 @@ int main(void)
                     static AIL_Gui_Label     search_label;
                     static AIL_Gui_Input_Box search_input_box;
 
-                    if (requires_recalc) {
+                    if (AIL_UNLIKELY(requires_recalc || loaded_lib_in_prev_frame)) {
                         u32 search_margin = 15;
                         u32 search_x      = library_label.bounds.x + library_label_size.x + library_label.defaultStyle.border_width + 2*library_label.defaultStyle.pad + style_search.border_width + search_margin;
                         search_bounds = (Rectangle) {
@@ -255,10 +258,10 @@ int main(void)
                     static AIL_DA(Song) songs;
                     if (search_res.updated) update_songs = true && search_input_box.label.text.len;
                     if (update_songs) {
-                        ail_da_free(&songs);
+                        if (songs.data != library.data) ail_da_free(&songs);
                         songs = search_songs(search_input_box.label.text.data);
                         update_songs = false;
-                    } else songs = library;
+                    } else if (!songs.data) songs = library;
 
 
                     // @TODO: Add search bar
@@ -377,7 +380,7 @@ int main(void)
 
         DrawFPS(win_width - 90, 10);
         EndDrawing();
-        ail_alloc_arena_free_all(frame_arena.data);
+        // ail_alloc_arena_free_all(frame_arena.data);
     }
 
     CloseWindow();
@@ -433,12 +436,16 @@ bool is_songname_taken(const char *name)
     return false;
 }
 
-bool is_prefix(const char *restrict prefix, const char *restrict str)
+bool is_prefix(const char *restrict prefix, const char *restrict str, bool ignore_case)
 {
     bool is_prefix = true;
     u32 i = 0;
     for (; str[i] && prefix[i] && is_prefix; i++) {
-        is_prefix = prefix[i] == str[i];
+        char c1 = str[i];
+        char c2 = prefix[i];
+        if (ignore_case && str[i]    >= 'A' && str[i]    <= 'Z') c1 += 'a' - 'A';
+        if (ignore_case && prefix[i] >= 'A' && prefix[i] <= 'Z') c2 += 'a' - 'A';
+        is_prefix = c1 == c2;
     }
     return is_prefix && !prefix[i];
 }
@@ -448,17 +455,25 @@ AIL_DA(Song) search_songs(const char *substr)
     AIL_DA(Song) prefixed    = ail_da_new(Song);
     AIL_DA(Song) substringed = ail_da_new(Song);
     u32 substr_len = strlen(substr);
+    printf("substr: %s\n", substr);
+    printf("library: { data: %p, len: %d, cap: %d }\n", (void *)library.data, library.len, library.cap);
     for (u32 i = 0; i < library.len; i++) {
         // Check for prefix
-        if (is_prefix(substr, library.data[i].name)) {
+        printf("i: %d, s: %s\n", i, library.data[i].name);
+        if (is_prefix(substr, library.data[i].name, true)) {
+            printf("is prefix\n");
             ail_da_push(&prefixed, library.data[i]);
         } else {
             // Check for substring
             bool is_substr = false;
             u32 name_len = strlen(library.data[i].name);
-            for (u32 j = 0; !is_substr && j < name_len - substr_len; j++) {
-                is_substr = is_prefix(substr, &library.data[i].name[j]);
+            if (name_len > substr_len) {
+                for (u32 j = 1; !is_substr && j <= name_len - substr_len; j++) {
+                    printf("j: %d\n", j);
+                    is_substr = is_prefix(substr, &library.data[i].name[j], true);
+                }
             }
+            if (is_substr) printf("is substring\n");
             if (is_substr) ail_da_push(&substringed, library.data[i]);
         }
     }
