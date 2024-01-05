@@ -295,7 +295,7 @@ int main(void)
                         };
                         AIL_Gui_State song_label_state = ail_gui_drawLabelOuterBounds(song_label, content_bounds);
                         if (song_label_state == AIL_GUI_STATE_PRESSED) {
-                            printf("Playing song: %s\n", song_name);
+                            DBG_LOG("Playing song: %s\n", song_name);
                             // @TODO: Send song to arduino & change view
                         }
                     }
@@ -410,12 +410,12 @@ void draw_loading_anim(u32 win_width, u32 win_height, bool start_new)
 void print_song(Song song)
 {
     char *key_strs[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    printf("{\n  name: %s\n  len: %lldms\n  chunks: [\n", song.name, song.len);
+    DBG_LOG("{\n  name: %s\n  len: %lldms\n  chunks: [\n", song.name, song.len);
     for (u32 i = 0; i < song.chunks.len; i++) {
         MusicChunk c = song.chunks.data[i];
-        printf("    { key: %2s, octave: %2d, on: %c, time: %lld, len: %d }\n", key_strs[c.key], c.octave, c.on ? 'y' : 'n', c.time, c.len);
+        DBG_LOG("    { key: %2s, octave: %2d, on: %c, time: %lld, len: %d }\n", key_strs[c.key], c.octave, c.on ? 'y' : 'n', c.time, c.len);
     }
-    printf("  ]\n}\n");
+    DBG_LOG("  ]\n}\n");
 }
 
 // Returns a new array, that contains first array a and then array b. Useful for adding strings for example
@@ -455,13 +455,13 @@ AIL_DA(Song) search_songs(const char *substr)
     AIL_DA(Song) prefixed    = ail_da_new(Song);
     AIL_DA(Song) substringed = ail_da_new(Song);
     u32 substr_len = strlen(substr);
-    printf("substr: %s\n", substr);
-    printf("library: { data: %p, len: %d, cap: %d }\n", (void *)library.data, library.len, library.cap);
+    DBG_LOG("substr: %s\n", substr);
+    DBG_LOG("library: { data: %p, len: %d, cap: %d }\n", (void *)library.data, library.len, library.cap);
     for (u32 i = 0; i < library.len; i++) {
         // Check for prefix
-        printf("i: %d, s: %s\n", i, library.data[i].name);
+        DBG_LOG("i: %d, s: %s\n", i, library.data[i].name);
         if (is_prefix(substr, library.data[i].name, true)) {
-            printf("is prefix\n");
+            DBG_LOG("is prefix\n");
             ail_da_push(&prefixed, library.data[i]);
         } else {
             // Check for substring
@@ -469,11 +469,11 @@ AIL_DA(Song) search_songs(const char *substr)
             u32 name_len = strlen(library.data[i].name);
             if (name_len > substr_len) {
                 for (u32 j = 1; !is_substr && j <= name_len - substr_len; j++) {
-                    printf("j: %d\n", j);
+                    DBG_LOG("j: %d\n", j);
                     is_substr = is_prefix(substr, &library.data[i].name[j], true);
                 }
             }
-            if (is_substr) printf("is substring\n");
+            if (is_substr) DBG_LOG("is substring\n");
             if (is_substr) ail_da_push(&substringed, library.data[i]);
         }
     }
@@ -595,7 +595,7 @@ void *parse_file(void *_filepath)
         song = res.val.song;
     }
     else {
-        printf("error in parsing: %s\n", res.val.err);
+        DBG_LOG("error in parsing: %s\n", res.val.err);
         err_msg = res.val.err;
     }
     file_parsed = true;

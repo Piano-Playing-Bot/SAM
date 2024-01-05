@@ -4,7 +4,14 @@
 #define AIL_ALL_IMPL
 #include "ail.h"
 
-// #define DEBUG
+// #define UI_DEBUG
+
+#ifdef UI_DEBUG
+#include <stdio.h> // For printf - only used for debugging
+#define DBG_LOG(...) printf(__VA_ARGS__)
+#else
+#define DBG_LOG(...) do { if (0) printf(__VA_ARGS__); } while(0)
+#endif
 
 // @Note on time: The idea is to use discretized clock-cycles for measuring time.
 // The time parameter in MusicChunk represents at which millisecond the chunk should start playing

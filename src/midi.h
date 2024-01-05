@@ -48,13 +48,6 @@ void write_midi(Song song, char *fpath);
 #ifndef _MIDI_IMPL_GUARD_
 #define _MIDI_IMPL_GUARD_
 
-#ifdef DEBUG
-#include <stdio.h> // For printf - only used for debugging
-#define dbg_log(...) printf(__VA_ARGS__)
-#else
-#define dbg_log(...) do { if (0) printf(__VA_ARGS__); } while(0)
-#endif
-
 // Code taken from MIDI Standard
 u32 read_var_len(AIL_Buffer *buffer)
 {
@@ -97,7 +90,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
         AIL_TODO();
     }
 
-    dbg_log("format: %d, ntrcks: %d, ticks per quarter-note: %d\n", format, ntrcks, ticksPQN);
+    DBG_LOG("format: %d, ntrcks: %d, ticks per quarter-note: %d\n", format, ntrcks, ticksPQN);
 
     if (format > 2) {
         sprintf(val.err, "Unknown Midi Format.\nPlease try a different Midi File\n");
@@ -112,11 +105,11 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
         AIL_ASSERT(ail_buf_read4msb(&buffer) == 0x4D54726B);
         u32 chunk_len   = ail_buf_read4msb(&buffer);
         u32 chunk_end   = buffer.idx + chunk_len;
-        dbg_log("Parsing chunk from %#010llx to %#010x\n", buffer.idx, chunk_end);
+        DBG_LOG("Parsing chunk from %#010llx to %#010x\n", buffer.idx, chunk_end);
         while (buffer.idx < chunk_end) {
             // Parse MTrk events
             u32 delta_time = read_var_len(&buffer);
-            dbg_log("index: %#010llx, delta_time: %d\n", buffer.idx, delta_time);
+            DBG_LOG("index: %#010llx, delta_time: %d\n", buffer.idx, delta_time);
             ticks += delta_time;
             if (ail_buf_peek1(buffer) == 0xff) {
                 buffer.idx++;
@@ -159,7 +152,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                         // @TODO: This is a change of tempo and should thus be recorded for the track somehow
                         AIL_ASSERT(ail_buf_read1(&buffer) == 3);
                         tempo = ail_buf_read3msb(&buffer);
-                        dbg_log("tempo: %d\n", tempo);
+                        DBG_LOG("tempo: %d\n", tempo);
                     } break;
                     case 0x54: {
                         AIL_TODO();
@@ -172,7 +165,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                             .clocks = ail_buf_read1(&buffer),
                             .b      = ail_buf_read1(&buffer),
                         };
-                        dbg_log("time_signature: (%d, %d, %d, %d)\n", time_signature.num, time_signature.den, time_signature.clocks, time_signature.b);
+                        DBG_LOG("time_signature: (%d, %d, %d, %d)\n", time_signature.num, time_signature.den, time_signature.clocks, time_signature.b);
                     } break;
                     case 0x59: {
                         AIL_ASSERT(ail_buf_read1(&buffer) == 2);
@@ -180,7 +173,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                             .sf = (i8) ail_buf_read1(&buffer),
                             .mi = (i8) ail_buf_read1(&buffer),
                         };
-                        dbg_log("key_signature: (%d, %d)\n", key_signature.sf, key_signature.mi);
+                        DBG_LOG("key_signature: (%d, %d)\n", key_signature.sf, key_signature.mi);
                     } break;
                     case 0x7f: {
                         AIL_TODO();
@@ -188,7 +181,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                     default: {
                         buffer.idx -= 2;
                         u16 ev = ail_buf_read2msb(&buffer);
-                        dbg_log("\033[33mEncountered unknown meta event %#04x.\033[0m\n", ev);
+                        DBG_LOG("\033[33mEncountered unknown meta event %#04x.\033[0m\n", ev);
                         u8 len = ail_buf_read1(&buffer);
                         buffer.idx += len;
                     }
@@ -199,11 +192,11 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                 if (ail_buf_peek1(buffer) & 0x80) {
                     command = (ail_buf_peek1(buffer) & 0xf0) >> 4;
                     channel = ail_buf_read1(&buffer) & 0x0f;
-                    dbg_log("New Satus - ");
+                    DBG_LOG("New Satus - ");
                 } else {
-                    dbg_log("Running Status - ");
+                    DBG_LOG("Running Status - ");
                 }
-                dbg_log("Command: %#01x, Channel: %#01x\n", command, channel);
+                DBG_LOG("Command: %#01x, Channel: %#01x\n", command, channel);
                 switch (command) {
                     case 0x8:
                     case 0x9: {
@@ -229,7 +222,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                         // Control Change
                         u8 c = ail_buf_read1(&buffer);
                         u8 v = ail_buf_read1(&buffer);
-                        dbg_log("Control Change: c = %#01x, v = %#01x\n", c, v);
+                        DBG_LOG("Control Change: c = %#01x, v = %#01x\n", c, v);
                         AIL_ASSERT(v <= 127);
                         if (c < 120) {
                             // Do nothing for now
@@ -268,7 +261,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                     case 0xC: {
                         // Program Change
                         u8 patch = ail_buf_read1(&buffer);
-                        dbg_log("Program Change: patch = %d\n", patch);
+                        DBG_LOG("Program Change: patch = %d\n", patch);
                         // Do nothing
                     } break;
                     case 0xD: {
