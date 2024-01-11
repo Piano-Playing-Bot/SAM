@@ -63,7 +63,8 @@ u32 read_var_len(AIL_Buffer *buffer)
 
 ParseMidiRes parse_midi(AIL_Buffer buffer)
 {
-    ParseMidiResVal val = {0};
+    ParseMidiResVal val = { 0 };
+    val.song.chunks     = ail_da_new(MusicChunk);
     #define midiFileStartLen 8
     const char midiFileStart[midiFileStartLen] = {'M', 'T', 'h', 'd', 0, 0, 0, 6};
 

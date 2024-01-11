@@ -2,8 +2,8 @@ PROD_FLAGS="-O2 -s"
 DEV_FLAGS="-g -ggdb"
 CFLAGS="-Wall -Wextra -Wimplicit -Wpedantic -Wno-unused-function -std=c99"
 
-LIB_PATHS="-L./bin"
-INCLUDES="-I./deps/tsoding -I./deps/raylib/src -I./deps/ail"
+LIB_PATHS="-L./bin \"-L/Program Files/vcpkg/packages/libusb_x64-windows/lib\""
+INCLUDES="-I./deps/tsoding -I./deps/raylib/src -I./deps/ail \"-I/Program Files/vcpkg/packages/libusb_x64-windows/include/libusb-1.0\""
 RAYLIB_DEP="-lraylib -lm -lpthread"
 DEPS="$INCLUDES $LIB_PATHS $RAYLIB_DEP $RAYGUI_DEP"
 

@@ -1119,7 +1119,7 @@ extern "C" {
 #define GLFW_WIN32_KEYBOARD_MENU    0x00025001
 /*! @brief Wayland specific
  *  [window hint](@ref GLFW_WAYLAND_APP_ID_hint).
- *  
+ *
  *  Allows specification of the Wayland app_id.
  */
 #define GLFW_WAYLAND_APP_ID         0x00026001
@@ -2027,7 +2027,7 @@ typedef struct GLFWgammaramp
     unsigned int size;
 } GLFWgammaramp;
 
-/*! @brief Image data.
+/*! @brief RL_Image data.
  *
  *  This describes a single 2D image.  See the documentation for each related
  *  function what the expected pixel format is.
