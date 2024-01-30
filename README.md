@@ -9,4 +9,4 @@ Running this script, will automatically build the entire program and all depende
 
 It has only been tested on Windows so far, but should work just as well on any Unix system.
 
-Prerequesites are `gcc` (and `make` for building the raylib dependency), which both need to be installed and in the path.
+Prerequesites are `gcc` and `make`, which both need to be installed and in the path.

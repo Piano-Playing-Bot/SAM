@@ -2,6 +2,15 @@
 // Includes //
 //////////////
 
+#define AIL_ALLOC_IMPL
+#define AIL_ALL_IMPL
+#define AIL_MD_IMPL
+#define AIL_GUI_IMPL
+#define AIL_FS_IMPL
+#define AIL_BUF_IMPL
+#define AIL_SV_IMPL
+#include "ail_fs.h"
+#include "common.h"
 #include "libusb.h"
 #include "../deps/raylib/src/raylib.h"  // For immediate UI framework
 #include <stdbool.h> // For boolean definitions
@@ -9,26 +18,16 @@
 #include <pthread.h> // For threads and mutexes
 #include <unistd.h>  // For sleep @Cleanup
 #include "math.h"    // For sinf, cosf
-#define MIDI_IMPL
-#include "midi.h"
+#include "midi.c"
 // #define AIL_ALLOC_PRINT_MEM
-#define AIL_ALLOC_IMPL
 #include "ail_alloc.h"
-#define AIL_ALL_IMPL
 #include "ail.h"
 // #define AIL_MD_MEM_DEBUG
 // #define AIL_MD_MEM_PRINT
-#define AIL_MD_IMPL
 #include "ail_md.h"
-#define AIL_GUI_IMPL
 #include "ail_gui.h"
-#define AIL_FS_IMPL
-#include "ail_fs.h"
-#define AIL_BUF_IMPL
 #include "ail_buf.h"
-#define AIL_SV_IMPL
 #include "ail_sv.h"
-#include "common.h"
 
 // PIDI = Piano Digital Interface
 // PDIL = PIDI-Library
