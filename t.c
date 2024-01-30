@@ -53,7 +53,7 @@ int main(void)
 						for (uint8_t l = 0; l < altsetting->bNumEndpoints; l++) {
 							const struct libusb_endpoint_descriptor *endpoint = &altsetting->endpoint[l];
 							enum libusb_endpoint_direction dir = endpoint->bEndpointAddress & 0x80;
-							enum libusb_endpoint_transfer_type type = endpoint->bmAttributes & 0b11;
+							enum libusb_endpoint_transfer_type type = endpoint->bmAttributes & 0x3;
 							if (type == LIBUSB_ENDPOINT_TRANSFER_TYPE_BULK && dir == LIBUSB_ENDPOINT_OUT) {
 								USB usb = { device, libusb_get_device_address(device), endpoint->bEndpointAddress };
 								ail_da_push(&usbs, usb);

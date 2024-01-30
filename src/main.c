@@ -3,7 +3,7 @@
 //////////////
 
 #include "libusb.h"
-#include "raylib.h"  // For immediate UI framework
+#include "../deps/raylib/src/raylib.h"  // For immediate UI framework
 #include <stdbool.h> // For boolean definitions
 #include <string.h>  // For memcpy
 #include <pthread.h> // For threads and mutexes
@@ -48,6 +48,14 @@ typedef enum {
     UI_VIEW_PARSING_SONG, // In the process of uploading a new song
 } UI_View;
 
+typedef struct USB {
+	libusb_device *device;
+	u8 device_addr;
+	u8 endpoint_addr;
+} USB;
+
+AIL_DA_INIT(USB);
+
 AIL_DA(Song) search_songs(const char *substr);
 void draw_loading_anim(u32 win_width, u32 win_height, bool start_new);
 bool is_songname_taken(const char *name);
@@ -77,8 +85,12 @@ UI_View view = UI_VIEW_LIBRARY;
 
 int main(void)
 {
+    libusb_init_context(NULL, NULL, 0);
+
     // Initialize memory arena for UI
     ail_gui_allocator = ail_alloc_arena_new(2*1024, &ail_alloc_std);
+    u8 search_text_buffer[1024] = {0};
+    AIL_Allocator search_text_allocator = ail_alloc_buffer_new(1024, search_text_buffer);
 
     i32 win_width  = 1200;
     i32 win_height = 600;
@@ -238,10 +250,11 @@ int main(void)
                     AIL_Gui_State upload_button_state = ail_gui_drawLabel(upload_button);
                     if (upload_button_state == AIL_GUI_STATE_PRESSED) SET_VIEW(UI_VIEW_DND);
 
-                    static char             *search_placeholder = "Search...";
-                    static RL_Rectangle         search_bounds;
-                    static AIL_Gui_Label     search_label;
-                    static AIL_Gui_Input_Box search_input_box;
+                    static char *search_text = "";
+                    static char *search_placeholder = "Search...";
+                    static RL_Rectangle       search_bounds;
+                    static AIL_Gui_Input_Box  search_input_box;
+                    static AIL_Gui_Update_Res search_res;
 
                     if (AIL_UNLIKELY(requires_recalc || loaded_lib_in_prev_frame)) {
                         u32 search_margin = 15;
@@ -252,18 +265,21 @@ int main(void)
                             upload_button.bounds.x - upload_button.defaultStyle.border_width - search_margin - style_search.border_width - search_x,
                             library_label.bounds.height - 2*style_search.border_width,
                         };
-                        search_label     = ail_gui_newLabel(search_bounds, search_label.text.data ? search_label.text.data : "", style_search, style_search);
+                        AIL_Gui_Label search_label = {
+                            .bounds       = search_bounds,
+                            .text         = ail_da_from_parts(char, search_text, 1, 1, &search_text_allocator),
+                            .defaultStyle = style_search,
+                            .hovered      = style_search,
+                        };
                         search_input_box = ail_gui_newInputBox(search_placeholder, false, false, true, search_label);
                     }
-                    AIL_Gui_Update_Res search_res = ail_gui_drawInputBox(&search_input_box);
+                    search_res  = ail_gui_drawInputBox(&search_input_box);
+                    search_text = search_input_box.label.text.data;
 
-                    static bool update_songs = false;
                     static AIL_DA(Song) songs;
-                    if (search_res.updated) update_songs = true && search_input_box.label.text.len;
-                    if (update_songs) {
+                    if (search_res.updated && search_input_box.label.text.len) {
                         if (songs.data != library.data) ail_da_free(&songs);
                         songs = search_songs(search_input_box.label.text.data);
-                        update_songs = false;
                     } else if (!songs.data) songs = library;
 
 
@@ -523,7 +539,7 @@ bool save_library()
         ail_buf_write8lsb(&buf, song.len);
         ail_buf_writestr(&buf, song.name, name_len);
     }
-    if (!RL_DirectoryExists(data_dir_path.str)) mkdir(data_dir_path.str);
+    if (!RL_DirectoryExists(data_dir_path.str)) mkdir(data_dir_path.str, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     return ail_buf_to_file(&buf, library_filepath.str);
 }
 
@@ -534,7 +550,7 @@ void *load_library(void *arg)
     ail_da_free(&library);
 
     if (!RL_DirectoryExists(data_dir_path.str)) {
-        mkdir(data_dir_path.str);
+        mkdir(data_dir_path.str, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         goto nothing_to_load;
     } else {
         if (!RL_FileExists(library_filepath.str)) goto nothing_to_load;
