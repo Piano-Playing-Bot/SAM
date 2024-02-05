@@ -14,10 +14,9 @@ CFLAGS += -ggdb
 export RAYLIB_BUILD_MODE=DEBUG
 endif
 
-INCLUDES  = -I$(COMMON_PATH) -I./deps/raylib/src -I$(COMMON_PATH)ail "-I/Program Files/vcpkg/installed/x64-windows/include/libusb-1.0"
-LIB_PATHS = -L./bin "-L/Program Files/vcpkg/installed/x64-windows/lib"
-LIBS      = -lraylib -lopengl32 -lgdi32 -lwinmm -lpthread -llibusb-1.0
-CFLAGS   += $(INCLUDES) $(LIB_PATHS) $(LIBS)
+INCLUDES  = -I$(COMMON_PATH) -I./deps/raylib/src -I$(COMMON_PATH)ail
+LIBS      = -L./bin -lraylib -lopengl32 -lgdi32 -lwinmm -lpthread -lwinspool
+CFLAGS   += $(INCLUDES) $(LIBS)
 
 
 .PHONY: clean main

@@ -11,7 +11,6 @@
 #define AIL_SV_IMPL
 #include "ail_fs.h"
 #include "common.h"
-#include "libusb.h"
 #include "../deps/raylib/src/raylib.h"  // For immediate UI framework
 #include <stdbool.h> // For boolean definitions
 #include <string.h>  // For memcpy
@@ -19,6 +18,7 @@
 #include <unistd.h>  // For sleep @Cleanup
 #include "math.h"    // For sinf, cosf
 #include "midi.c"
+#include "comm.c"
 // #define AIL_ALLOC_PRINT_MEM
 #include "ail_alloc.h"
 #include "ail.h"
@@ -29,16 +29,25 @@
 #include "ail_buf.h"
 #include "ail_sv.h"
 
-// PIDI = Piano Digital Interface
-// PDIL = PIDI-Library
-u32 PIDI_MAGIC = ('P' << 24) | ('I' << 16) | ('D' << 8) | ('I' << 0);
-u32 PDIL_MAGIC = ('P' << 24) | ('D' << 16) | ('I' << 8) | ('L' << 0);
+#define PRIMARY_COLOR          (RL_Color) { 0xff, 0x8c, 0x00, 0xff }
+#define PRIMARY_BORDER_COLOR   (RL_Color) { 0x33, 0x33, 0x33, 0xff }
+#define SECONDARY_COLOR        (RL_Color) { 0x80, 0x80, 0x80, 0xff }
+#define SECONDARY_BORDER_COLOR (RL_Color) { 0x33, 0x33, 0x33, 0xff }
+#define BG_COLOR               (RL_Color) { 0x00, 0x00, 0x00, 0xff }
+#define SURFACE_COLOR          (RL_Color) { 0xff, 0x8c, 0x00, 0xff }
+#define SURFACE_BORDER         (RL_Color) { 0xff, 0x8c, 0x00, 0xff }
+#define ERROR_COLOR            (RL_Color) { 0xff, 0x00, 0x00, 0xff }
+#define SUCC_COLOR             (RL_Color) { 0x00, 0xff, 0x00, 0xff }
+#define ON_PRIMARY_COLOR       (RL_Color) { 0xff, 0xff, 0xff, 0xff }
+#define ON_SECONDARY_COLOR     (RL_Color) { 0xff, 0xff, 0xff, 0xff }
+#define ON_BG_COLOR            (RL_Color) { 0xff, 0xff, 0xff, 0xff }
+#define ON_SURFACE_COLOR       (RL_Color) { 0xff, 0xff, 0xff, 0xff }
+#define ON_ERROR_COLOR         (RL_Color) { 0xff, 0x00, 0x00, 0xff }
 
 const AIL_Str data_dir_path    = { .str = "./data/", .len = 7 };
 const AIL_Str library_filepath = { .str = "./data/library.pdil", .len = 19 };
 
 #define FPS 60
-#define BG_COLOR RL_BLACK
 
 typedef enum {
     UI_VIEW_LIBRARY,      // Show the library (possibly with search results)
@@ -47,18 +56,9 @@ typedef enum {
     UI_VIEW_PARSING_SONG, // In the process of uploading a new song
 } UI_View;
 
-typedef struct USB {
-	libusb_device *device;
-	u8 device_addr;
-	u8 endpoint_addr;
-} USB;
-
-AIL_DA_INIT(USB);
-
 AIL_DA(Song) search_songs(const char *substr);
 void draw_loading_anim(u32 win_width, u32 win_height, bool start_new);
 bool is_songname_taken(const char *name);
-void  print_song(Song song);
 bool  save_pidi(Song song);
 bool  save_library();
 void *load_library(void *arg);
@@ -84,8 +84,6 @@ UI_View view = UI_VIEW_LIBRARY;
 
 int main(void)
 {
-    libusb_init_context(NULL, NULL, 0);
-
     // Initialize memory arena for UI
     ail_gui_allocator = ail_alloc_arena_new(2*1024, &ail_alloc_std);
     u8 search_text_buffer[1024] = {0};
@@ -100,8 +98,11 @@ int main(void)
     char *file_path = NULL;
     pthread_t fileParsingThread;
     pthread_t loadLibraryThread;
+    pthread_t checkConnThread;
 
+    AIL_Allocator checkConnThreadAllocator = ail_alloc_arena_new(AIL_ALLOC_PAGE_SIZE, &ail_alloc_pager);
     pthread_create(&loadLibraryThread, NULL, load_library, NULL);
+    pthread_create(&checkConnThread,   NULL, check_connection_daemon, &checkConnThreadAllocator);
 
     f32 size_smaller = 35;
     f32 size_default = 50;
@@ -397,7 +398,24 @@ int main(void)
             } break;
         }
 
-        RL_DrawFPS(win_width - 90, 10);
+        // Show connection status
+        {
+            char *text;
+            RL_Color color;
+            f32 pad = 15;
+            f32 spacing = 2;
+            if (IsArduinoConnected) {
+                text  = "Connected to Arduino";
+                color = SUCC_COLOR;
+            } else {
+                text  = "Not Connected to Arduino";
+                color = ERROR_COLOR;
+            }
+            f32 width = MeasureTextEx(font, text, size_smaller, spacing).x;
+            RL_Vector2 pos = { win_width - width - pad, win_height - size_smaller - pad };
+            RL_DrawTextEx(font, text, pos, size_smaller, spacing, color);
+        }
+
         RL_EndDrawing();
         ail_gui_allocator.free_all(ail_gui_allocator.data);
     }
@@ -424,17 +442,6 @@ void draw_loading_anim(u32 win_width, u32 win_height, bool start_new)
         DrawCircle(x, y, loading_anim_circle_radius, col);
     }
     loading_anim_idx = (loading_anim_idx + 1) % loading_anim_len;
-}
-
-void print_song(Song song)
-{
-    char *key_strs[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    DBG_LOG("{\n  name: %s\n  len: %lldms\n  chunks: [\n", song.name, song.len);
-    for (u32 i = 0; i < song.chunks.len; i++) {
-        MusicChunk c = song.chunks.data[i];
-        DBG_LOG("    { key: %2s, octave: %2d, on: %c, time: %lld, len: %d }\n", key_strs[c.key], c.octave, c.on ? 'y' : 'n', c.time, c.len);
-    }
-    DBG_LOG("  ]\n}\n");
 }
 
 // Returns a new array, that contains first array a and then array b. Useful for adding strings for example
@@ -507,12 +514,7 @@ bool save_pidi(Song song)
     ail_buf_write4msb(&buf, PIDI_MAGIC);
     ail_buf_write4lsb(&buf, song.chunks.len);
     for (u32 i = 0; i < song.chunks.len; i++) {
-        MusicChunk chunk = song.chunks.data[i];
-        ail_buf_write8lsb(&buf, chunk.time);
-        ail_buf_write2lsb(&buf, chunk.len);
-        ail_buf_write1   (&buf, chunk.key);
-        ail_buf_write1   (&buf, (u8) chunk.octave);
-        ail_buf_write1   (&buf, (u8) chunk.on);
+        encode_chunk(&buf, song.chunks.data[i]);
     }
 
     u64 data_dir_path_len = data_dir_path.len;
