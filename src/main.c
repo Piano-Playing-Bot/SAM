@@ -2,43 +2,52 @@
 // Includes //
 //////////////
 
-#include "raylib.h"  // For immediate UI framework
+#define AIL_ALLOC_IMPL
+#define AIL_ALL_IMPL
+#define AIL_MD_IMPL
+#define AIL_GUI_IMPL
+#define AIL_FS_IMPL
+#define AIL_BUF_IMPL
+#define AIL_SV_IMPL
+#include "ail_fs.h"
+#include "common.h"
+#include "../deps/raylib/src/raylib.h"  // For immediate UI framework
 #include <stdbool.h> // For boolean definitions
 #include <string.h>  // For memcpy
 #include <pthread.h> // For threads and mutexes
 #include <unistd.h>  // For sleep @Cleanup
 #include "math.h"    // For sinf, cosf
-#define MIDI_IMPL
-#include "midi.h"
+#include "midi.c"
+#include "comm.c"
 // #define AIL_ALLOC_PRINT_MEM
-#define AIL_ALLOC_IMPL
 #include "ail_alloc.h"
-#define AIL_ALL_IMPL
 #include "ail.h"
-#define AIL_MD_MEM_DEBUG
-#define AIL_MD_MEM_PRINT
-#define AIL_MD_IMPL
+// #define AIL_MD_MEM_DEBUG
+// #define AIL_MD_MEM_PRINT
 #include "ail_md.h"
-#define AIL_GUI_IMPL
 #include "ail_gui.h"
-#define AIL_FS_IMPL
-#include "ail_fs.h"
-#define AIL_BUF_IMPL
 #include "ail_buf.h"
-#define AIL_SV_IMPL
 #include "ail_sv.h"
-#include "common.h"
 
-// PIDI = Piano Digital Interface
-// PDIL = PIDI-Library
-u32 PIDI_MAGIC = ('P' << 24) | ('I' << 16) | ('D' << 8) | ('I' << 0);
-u32 PDIL_MAGIC = ('P' << 24) | ('D' << 16) | ('I' << 8) | ('L' << 0);
+#define PRIMARY_COLOR          (RL_Color) { 0xff, 0x8c, 0x00, 0xff }
+#define PRIMARY_BORDER_COLOR   (RL_Color) { 0x33, 0x33, 0x33, 0xff }
+#define SECONDARY_COLOR        (RL_Color) { 0x80, 0x80, 0x80, 0xff }
+#define SECONDARY_BORDER_COLOR (RL_Color) { 0x33, 0x33, 0x33, 0xff }
+#define BG_COLOR               (RL_Color) { 0x00, 0x00, 0x00, 0xff }
+#define SURFACE_COLOR          (RL_Color) { 0xff, 0x8c, 0x00, 0xff }
+#define SURFACE_BORDER         (RL_Color) { 0xff, 0x8c, 0x00, 0xff }
+#define ERROR_COLOR            (RL_Color) { 0xff, 0x00, 0x00, 0xff }
+#define SUCC_COLOR             (RL_Color) { 0x00, 0xff, 0x00, 0xff }
+#define ON_PRIMARY_COLOR       (RL_Color) { 0xff, 0xff, 0xff, 0xff }
+#define ON_SECONDARY_COLOR     (RL_Color) { 0xff, 0xff, 0xff, 0xff }
+#define ON_BG_COLOR            (RL_Color) { 0xff, 0xff, 0xff, 0xff }
+#define ON_SURFACE_COLOR       (RL_Color) { 0xff, 0xff, 0xff, 0xff }
+#define ON_ERROR_COLOR         (RL_Color) { 0xff, 0x00, 0x00, 0xff }
 
 const AIL_Str data_dir_path    = { .str = "./data/", .len = 7 };
 const AIL_Str library_filepath = { .str = "./data/library.pdil", .len = 19 };
 
 #define FPS 60
-#define BG_COLOR BLACK
 
 typedef enum {
     UI_VIEW_LIBRARY,      // Show the library (possibly with search results)
@@ -50,7 +59,6 @@ typedef enum {
 AIL_DA(Song) search_songs(const char *substr);
 void draw_loading_anim(u32 win_width, u32 win_height, bool start_new);
 bool is_songname_taken(const char *name);
-void  print_song(Song song);
 bool  save_pidi(Song song);
 bool  save_library();
 void *load_library(void *arg);
@@ -78,27 +86,32 @@ int main(void)
 {
     // Initialize memory arena for UI
     ail_gui_allocator = ail_alloc_arena_new(2*1024, &ail_alloc_std);
+    u8 search_text_buffer[1024] = {0};
+    AIL_Allocator search_text_allocator = ail_alloc_buffer_new(1024, search_text_buffer);
 
     i32 win_width  = 1200;
     i32 win_height = 600;
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(win_width, win_height, "Piano Player");
-    SetTargetFPS(FPS);
+    RL_SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    RL_InitWindow(win_width, win_height, "Piano Player");
+    RL_SetTargetFPS(FPS);
 
     char *file_path = NULL;
     pthread_t fileParsingThread;
     pthread_t loadLibraryThread;
+    pthread_t checkConnThread;
 
+    AIL_Allocator checkConnThreadAllocator = ail_alloc_arena_new(AIL_ALLOC_PAGE_SIZE, &ail_alloc_pager);
     pthread_create(&loadLibraryThread, NULL, load_library, NULL);
+    pthread_create(&checkConnThread,   NULL, check_connection_daemon, &checkConnThreadAllocator);
 
     f32 size_smaller = 35;
     f32 size_default = 50;
     f32 size_max     = size_default;
-    Font font = LoadFontEx("./assets/Roboto-Regular.ttf", size_max, NULL, 95);
+    RL_Font font = LoadFontEx("./assets/Roboto-Regular.ttf", size_max, NULL, 95);
     AIL_Gui_Style style_default = {
-        .color        = WHITE,
-        .bg           = BLANK,
-        .border_color = BLANK,
+        .color        = RL_WHITE,
+        .bg           = RL_BLANK,
+        .border_color = RL_BLANK,
         .border_width = 0,
         .font         = font,
         .font_size    = size_default,
@@ -112,9 +125,9 @@ int main(void)
     style_default_lt.hAlign = AIL_GUI_ALIGN_LT;
     style_default_lt.vAlign = AIL_GUI_ALIGN_LT;
     AIL_Gui_Style style_button_default = {
-        .color        = WHITE,
-        .bg           = (Color){42, 230, 37, 255},
-        .border_color = (Color){ 9, 170,  6, 255},
+        .color        = RL_WHITE,
+        .bg           = (RL_Color){42, 230, 37, 255},
+        .border_color = (RL_Color){ 9, 170,  6, 255},
         .border_width = 5,
         .font         = font,
         .font_size    = size_default,
@@ -125,11 +138,11 @@ int main(void)
         .vAlign       = AIL_GUI_ALIGN_C,
     };
     AIL_Gui_Style style_button_hover = ail_gui_cloneStyle(style_button_default);
-    style_button_hover.border_color = BLACK;
+    style_button_hover.border_color = RL_BLACK;
     AIL_Gui_Style style_song_name_default = {
-        .color        = WHITE,
-        .bg           = LIGHTGRAY,
-        .border_color = GRAY,
+        .color        = RL_WHITE,
+        .bg           = RL_LIGHTGRAY,
+        .border_color = RL_GRAY,
         .font         = font,
         .border_width = 5,
         .font_size    = size_smaller,
@@ -140,11 +153,11 @@ int main(void)
         .vAlign       = AIL_GUI_ALIGN_LT,
     };
     AIL_Gui_Style style_song_name_hover = ail_gui_cloneStyle(style_song_name_default);
-    style_song_name_hover.bg = GRAY;
+    style_song_name_hover.bg = RL_GRAY;
     AIL_Gui_Style     style_search = {
-        .color        = WHITE,
+        .color        = RL_WHITE,
         .bg           = BG_COLOR,
-        .border_color = GRAY,
+        .border_color = RL_GRAY,
         .font         = font,
         .border_width = 5,
         .font_size    = size_smaller,
@@ -155,7 +168,7 @@ int main(void)
         .vAlign       = AIL_GUI_ALIGN_C,
     };
 
-    Rectangle header_bounds, content_bounds;
+    RL_Rectangle header_bounds, content_bounds;
     AIL_Gui_Label centered_label = {
         .text         = ail_da_new_empty(char),
         .defaultStyle = style_default,
@@ -178,19 +191,19 @@ int main(void)
     bool is_first_frame    = true;
     bool view_changed      = false;
     bool view_prev_changed = false;
-    while (!WindowShouldClose()) {
-        BeginDrawing();
+    while (!RL_WindowShouldClose()) {
+        RL_BeginDrawing();
 
-        bool is_resized = IsWindowResized() || is_first_frame;
+        bool is_resized = RL_IsWindowResized() || is_first_frame;
         is_first_frame = false;
         if (is_resized) {
-            win_width  = GetScreenWidth();
-            win_height = GetScreenHeight();
+            win_width  = RL_GetScreenWidth();
+            win_height = RL_GetScreenHeight();
             u32 header_pad = 5;
-            header_bounds  = (Rectangle) { header_pad, 0, win_width - 2*header_pad, AIL_CLAMP(win_height / 10, size_max + 30, size_max*2) };
-            content_bounds = (Rectangle) { header_bounds.x, header_bounds.y + header_bounds.height, header_bounds.width, win_height - header_bounds.y - header_bounds.height };
+            header_bounds  = (RL_Rectangle) { header_pad, 0, win_width - 2*header_pad, AIL_CLAMP(win_height / 10, size_max + 30, size_max*2) };
+            content_bounds = (RL_Rectangle) { header_bounds.x, header_bounds.y + header_bounds.height, header_bounds.width, win_height - header_bounds.y - header_bounds.height };
         }
-        ClearBackground(BG_COLOR);
+        RL_ClearBackground(BG_COLOR);
         SetMouseCursor(MOUSE_CURSOR_DEFAULT);
 
         if (view_prev_changed && view_changed) view_changed = false;
@@ -210,10 +223,10 @@ int main(void)
             case UI_VIEW_LIBRARY: {
                 static bool loaded_lib_in_prev_frame = false;
                 if (requires_recalc) {
-                    centered_label.bounds = (Rectangle){0, 0, win_width, win_height};
+                    centered_label.bounds = (RL_Rectangle){0, 0, win_width, win_height};
                     library_label.bounds  = header_bounds;
                     u32     upload_margin   = 5;
-                    Vector2 upload_txt_size = MeasureTextEx(upload_button.defaultStyle.font, upload_button.text.data, upload_button.defaultStyle.font_size, upload_button.defaultStyle.cSpacing);
+                    RL_Vector2 upload_txt_size = MeasureTextEx(upload_button.defaultStyle.font, upload_button.text.data, upload_button.defaultStyle.font_size, upload_button.defaultStyle.cSpacing);
                     upload_button.bounds.y      = header_bounds.y + upload_margin + upload_button.defaultStyle.border_width;
                     upload_button.bounds.height = header_bounds.height - upload_button.bounds.y - upload_button.defaultStyle.border_width - upload_margin;
                     upload_button.bounds.width  = upload_button.defaultStyle.border_width*2 + upload_button.defaultStyle.pad*2 + upload_txt_size.x;
@@ -227,9 +240,9 @@ int main(void)
                     SetMouseCursor(MOUSE_CURSOR_DEFAULT);
                 }
                 else {
-                    // DrawRectangle(header_bounds.x, header_bounds.y, header_bounds.width, header_bounds.height, LIGHTGRAY);
+                    // DrawRectangle(header_bounds.x, header_bounds.y, header_bounds.width, header_bounds.height, RL_LIGHTRL_GRAY);
                     AIL_Gui_Drawable_Text library_label_drawable;
-                    Vector2 library_label_size = ail_gui_measureText(library_label.text.data, library_label.bounds, library_label.defaultStyle, &library_label_drawable);
+                    RL_Vector2 library_label_size = ail_gui_measureText(library_label.text.data, library_label.bounds, library_label.defaultStyle, &library_label_drawable);
                     AIL_ASSERT(library_label_drawable.lineXs.data != NULL);
                     ail_gui_drawPreparedSized(library_label_drawable, library_label.bounds, library_label.defaultStyle);
                     ail_gui_free_drawable_text(&library_label_drawable);
@@ -237,32 +250,36 @@ int main(void)
                     AIL_Gui_State upload_button_state = ail_gui_drawLabel(upload_button);
                     if (upload_button_state == AIL_GUI_STATE_PRESSED) SET_VIEW(UI_VIEW_DND);
 
-                    static char             *search_placeholder = "Search...";
-                    static Rectangle         search_bounds;
-                    static AIL_Gui_Label     search_label;
-                    static AIL_Gui_Input_Box search_input_box;
+                    static char *search_text = "";
+                    static char *search_placeholder = "Search...";
+                    static RL_Rectangle       search_bounds;
+                    static AIL_Gui_Input_Box  search_input_box;
+                    static AIL_Gui_Update_Res search_res;
 
                     if (AIL_UNLIKELY(requires_recalc || loaded_lib_in_prev_frame)) {
                         u32 search_margin = 15;
                         u32 search_x      = library_label.bounds.x + library_label_size.x + library_label.defaultStyle.border_width + 2*library_label.defaultStyle.pad + style_search.border_width + search_margin;
-                        search_bounds = (Rectangle) {
+                        search_bounds = (RL_Rectangle) {
                             search_x,
                             library_label.bounds.y + style_search.border_width,
                             upload_button.bounds.x - upload_button.defaultStyle.border_width - search_margin - style_search.border_width - search_x,
                             library_label.bounds.height - 2*style_search.border_width,
                         };
-                        search_label     = ail_gui_newLabel(search_bounds, search_label.text.data ? search_label.text.data : "", style_search, style_search);
+                        AIL_Gui_Label search_label = {
+                            .bounds       = search_bounds,
+                            .text         = ail_da_from_parts(char, search_text, 1, 1, &search_text_allocator),
+                            .defaultStyle = style_search,
+                            .hovered      = style_search,
+                        };
                         search_input_box = ail_gui_newInputBox(search_placeholder, false, false, true, search_label);
                     }
-                    AIL_Gui_Update_Res search_res = ail_gui_drawInputBox(&search_input_box);
+                    search_res  = ail_gui_drawInputBox(&search_input_box);
+                    search_text = search_input_box.label.text.data;
 
-                    static bool update_songs = false;
                     static AIL_DA(Song) songs;
-                    if (search_res.updated) update_songs = true && search_input_box.label.text.len;
-                    if (update_songs) {
+                    if (search_res.updated && search_input_box.label.text.len) {
                         if (songs.data != library.data) ail_da_free(&songs);
                         songs = search_songs(search_input_box.label.text.data);
-                        update_songs = false;
                     } else if (!songs.data) songs = library;
 
 
@@ -282,7 +299,7 @@ int main(void)
                     u32 start_row             = scroll / (full_song_name_height + song_name_margin);
 
                     for (u32 i = start_row * song_names_per_row; i < songs.len; i++) {
-                        Rectangle song_bounds = {
+                        RL_Rectangle song_bounds = {
                             start_x + (full_song_name_width + song_name_margin)*(i % song_names_per_row),
                             content_bounds.y + song_name_margin + (full_song_name_height + song_name_margin)*(i / song_names_per_row) - scroll,
                             song_name_width,
@@ -309,10 +326,10 @@ int main(void)
                 centered_label.text = ail_da_from_parts(char, dnd_view_msg, strlen(dnd_view_msg), strlen(dnd_view_msg), &ail_default_allocator);
                 ail_gui_drawLabel(centered_label);
 
-                if (view_changed || view_prev_changed) UnloadDroppedFiles(LoadDroppedFiles());
-                if (IsFileDropped()) {
-                    FilePathList dropped_files = LoadDroppedFiles();
-                    if (dropped_files.count > 1 || !IsPathFile(dropped_files.paths[0])) {
+                if (view_changed || view_prev_changed) RL_UnloadDroppedFiles(RL_LoadDroppedFiles());
+                if (RL_IsFileDropped()) {
+                    RL_FilePathList dropped_files = RL_LoadDroppedFiles();
+                    if (dropped_files.count > 1 || !RL_IsPathFile(dropped_files.paths[0])) {
                         centered_label.text.data = "You can only drag and drop one MIDI-File to play it on the Piano.\nPlease try again";
                     } else {
                         SET_VIEW(UI_VIEW_ADD);
@@ -322,25 +339,25 @@ int main(void)
                         centered_label.text.data = file_path;
                         pthread_create(&fileParsingThread, NULL, parse_file, (void *)file_path);
                     }
-                    UnloadDroppedFiles(dropped_files);
+                    RL_UnloadDroppedFiles(dropped_files);
                 }
             } break;
 
             case UI_VIEW_ADD: {
                 static bool              btn_selected = false;
-                static Rectangle         input_bounds = {0};
+                static RL_Rectangle         input_bounds = {0};
                 static AIL_Gui_Label     name_label   = {0};
                 static AIL_Gui_Input_Box name_input   = {0};
                 static AIL_Gui_Label     add_button   = {0};
                 if (requires_recalc) {
                     u32 input_margin = AIL_MAX(5, win_width - AIL_CLAMP(win_width*8/10, 200, 1000));
-                    input_bounds = (Rectangle) { input_margin, (win_height - style_default.font_size) / 2, win_width - 2*input_margin, style_default.font_size + 2*style_default.pad };
+                    input_bounds = (RL_Rectangle) { input_margin, (win_height - style_default.font_size) / 2, win_width - 2*input_margin, style_default.font_size + 2*style_default.pad };
                     name_label   = ail_gui_newLabel(input_bounds, name_label.text.data ? name_label.text.data : filename, style_default, style_default);
-                    name_input   = ail_gui_newInputBox("Name of Music", false, false, true, name_label);
+                    name_input   = ail_gui_newInputBox("Name of RL_Music", false, false, true, name_label);
                 }
                 AIL_Gui_Style input_style = ail_gui_cloneStyle(style_default);
                 input_style.border_width      = 5;
-                input_style.border_color      = is_songname_taken(name_input.label.text.data) ? RED : GREEN;
+                input_style.border_color      = is_songname_taken(name_input.label.text.data) ? RL_RED : RL_GREEN;
                 input_style.bg                = BG_COLOR;
                 name_input.label.defaultStyle = input_style;
                 name_input.label.hovered      = input_style;
@@ -350,7 +367,7 @@ int main(void)
                 static char *btn_text = "Add";
                 u32 btn_text_size     = MeasureTextEx(style_button_default.font, btn_text, style_button_default.font_size, style_button_default.cSpacing).x;
                 i32 btn_width         = btn_text_size + 2*style_button_default.border_width + 2*style_button_default.pad;
-                Rectangle button_bounds = {
+                RL_Rectangle button_bounds = {
                     input_bounds.x + input_bounds.width - btn_width,
                     input_bounds.y + input_bounds.height + 15,
                     btn_width,
@@ -381,12 +398,29 @@ int main(void)
             } break;
         }
 
-        DrawFPS(win_width - 90, 10);
-        EndDrawing();
+        // Show connection status
+        {
+            char *text;
+            RL_Color color;
+            f32 pad = 15;
+            f32 spacing = 2;
+            if (IsArduinoConnected) {
+                text  = "Connected to Arduino";
+                color = SUCC_COLOR;
+            } else {
+                text  = "Not Connected to Arduino";
+                color = ERROR_COLOR;
+            }
+            f32 width = MeasureTextEx(font, text, size_smaller, spacing).x;
+            RL_Vector2 pos = { win_width - width - pad, win_height - size_smaller - pad };
+            RL_DrawTextEx(font, text, pos, size_smaller, spacing, color);
+        }
+
+        RL_EndDrawing();
         ail_gui_allocator.free_all(ail_gui_allocator.data);
     }
 
-    CloseWindow();
+    RL_CloseWindow();
     return 0;
 }
 
@@ -404,21 +438,10 @@ void draw_loading_anim(u32 win_width, u32 win_height, bool start_new)
         u32 x      = win_width/2  + loading_anim_circle_distance*cosf(2*PI*i_perc);
         u32 y      = win_height/2 + loading_anim_circle_distance*sinf(2*PI*i_perc);
         f32 delta  = (i + loading_anim_circle_count - loading_cur_song) / (f32)loading_anim_circle_count;
-        Color col = {0xff, 0xff, 0xff, 0xff*delta};
+        RL_Color col = {0xff, 0xff, 0xff, 0xff*delta};
         DrawCircle(x, y, loading_anim_circle_radius, col);
     }
     loading_anim_idx = (loading_anim_idx + 1) % loading_anim_len;
-}
-
-void print_song(Song song)
-{
-    char *key_strs[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    DBG_LOG("{\n  name: %s\n  len: %lldms\n  chunks: [\n", song.name, song.len);
-    for (u32 i = 0; i < song.chunks.len; i++) {
-        MusicChunk c = song.chunks.data[i];
-        DBG_LOG("    { key: %2s, octave: %2d, on: %c, time: %lld, len: %d }\n", key_strs[c.key], c.octave, c.on ? 'y' : 'n', c.time, c.len);
-    }
-    DBG_LOG("  ]\n}\n");
 }
 
 // Returns a new array, that contains first array a and then array b. Useful for adding strings for example
@@ -491,12 +514,7 @@ bool save_pidi(Song song)
     ail_buf_write4msb(&buf, PIDI_MAGIC);
     ail_buf_write4lsb(&buf, song.chunks.len);
     for (u32 i = 0; i < song.chunks.len; i++) {
-        MusicChunk chunk = song.chunks.data[i];
-        ail_buf_write8lsb(&buf, chunk.time);
-        ail_buf_write2lsb(&buf, chunk.len);
-        ail_buf_write1   (&buf, chunk.key);
-        ail_buf_write1   (&buf, (u8) chunk.octave);
-        ail_buf_write1   (&buf, (u8) chunk.on);
+        encode_chunk(&buf, song.chunks.data[i]);
     }
 
     u64 data_dir_path_len = data_dir_path.len;
@@ -522,7 +540,7 @@ bool save_library()
         ail_buf_write8lsb(&buf, song.len);
         ail_buf_writestr(&buf, song.name, name_len);
     }
-    if (!DirectoryExists(data_dir_path.str)) mkdir(data_dir_path.str);
+    if (!RL_DirectoryExists(data_dir_path.str)) mkdir(data_dir_path.str, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
     return ail_buf_to_file(&buf, library_filepath.str);
 }
 
@@ -532,11 +550,11 @@ void *load_library(void *arg)
     library_ready = false;
     ail_da_free(&library);
 
-    if (!DirectoryExists(data_dir_path.str)) {
-        mkdir(data_dir_path.str);
+    if (!RL_DirectoryExists(data_dir_path.str)) {
+        mkdir(data_dir_path.str, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
         goto nothing_to_load;
     } else {
-        if (!FileExists(library_filepath.str)) goto nothing_to_load;
+        if (!RL_FileExists(library_filepath.str)) goto nothing_to_load;
         AIL_Buffer buf = ail_buf_from_file(library_filepath.str);
         if (ail_buf_read4msb(&buf) != PDIL_MAGIC) goto nothing_to_load;
         u32 n = ail_buf_read4lsb(&buf);

@@ -382,7 +382,7 @@ ifeq ($(RAYLIB_LIBTYPE),SHARED)
 endif
 ifeq ($(PLATFORM),PLATFORM_DRM)
     # without EGL_NO_X11 eglplatform.h tears Xlib.h in which tears X.h in
-    # which contains a conflicting type Font
+    # which contains a conflicting type RL_Font
     CFLAGS += -DEGL_NO_X11
 endif
 # Use Wayland display on Linux desktop

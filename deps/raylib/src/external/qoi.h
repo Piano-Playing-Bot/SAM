@@ -4,7 +4,7 @@ Copyright (c) 2021, Dominic Szablewski - https://phoboslab.org
 SPDX-License-Identifier: MIT
 
 
-QOI - The "Quite OK Image" format for fast, lossless image compression
+QOI - The "Quite OK RL_Image" format for fast, lossless image compression
 
 -- About
 
@@ -580,7 +580,7 @@ void *qoi_decode(const void *data, int size, qoi_desc *desc, int channels) {
 		pixels[px_pos + 0] = px.rgba.r;
 		pixels[px_pos + 1] = px.rgba.g;
 		pixels[px_pos + 2] = px.rgba.b;
-		
+
 		if (channels == 4) {
 			pixels[px_pos + 3] = px.rgba.a;
 		}

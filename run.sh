@@ -1,3 +1,4 @@
+make
 if ./build.sh; then
 	cd ./bin
 	if $1 -eq "r"; then

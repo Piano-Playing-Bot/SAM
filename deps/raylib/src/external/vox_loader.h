@@ -150,7 +150,7 @@ void Vox_FreeArrays(VoxArray3D* voxarray);
 /////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////
 //									Implementation
-///////////////////////////////////////////////////////////////////////////////////////////// 
+/////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifdef VOX_LOADER_IMPLEMENTATION
@@ -248,13 +248,13 @@ static void freeArrayColor(ArrayColor* a)
 // Vox Loader
 /////////////////////////////////////////////////////////////////////////////////////////////
 
-#define CHUNKSIZE                   16      // chunk size (CHUNKSIZE*CHUNKSIZE*CHUNKSIZE) in voxels 
+#define CHUNKSIZE                   16      // chunk size (CHUNKSIZE*CHUNKSIZE*CHUNKSIZE) in voxels
 #define CHUNKSIZE_OPSHIFT            4      // 1<<4=16 -> Warning depend of CHUNKSIZE
 #define CHUNK_FLATTENOFFSET_OPSHIFT  8      // Warning depend of CHUNKSIZE
 
 //
 // used right handed system and CCW face
-// 
+//
 // indexes for voxelcoords, per face orientation
 //
 
@@ -270,7 +270,7 @@ static void freeArrayColor(ArrayColor* a)
 //#        |/           |/
 //#        4------------5
 
-// 
+//
 // CCW
 const int fv[6][4] = {
 	{0, 2, 6, 4 }, //-X
@@ -342,7 +342,7 @@ static void Vox_SetVoxel(VoxArray3D* pvoxarray, int x, int y, int z, unsigned ch
 
 	//if (offset > voxarray->arrayChunksSize)
 	//{
-	//	TraceLog(LOG_ERROR, "Out of array");
+	//	RL_TraceLog(LOG_ERROR, "Out of array");
 	//}
 
 	CubeChunk3D* chunk = &pvoxarray->m_arrayChunks[offset];
@@ -366,7 +366,7 @@ static void Vox_SetVoxel(VoxArray3D* pvoxarray, int x, int y, int z, unsigned ch
 
 	//if (offset > chunk->arraySize)
 	//{
-	//	TraceLog(LOG_ERROR, "Out of array");
+	//	RL_TraceLog(LOG_ERROR, "Out of array");
 	//}
 
 	chunk->m_array[offset] = id;
@@ -387,7 +387,7 @@ static unsigned char Vox_GetVoxel(VoxArray3D* pvoxarray, int x, int y, int z)
 
 	//if (offset > voxarray->arrayChunksSize)
 	//{
-	//	TraceLog(LOG_ERROR, "Out of array");
+	//	RL_TraceLog(LOG_ERROR, "Out of array");
 	//}
 
 	CubeChunk3D* chunk = &pvoxarray->m_arrayChunks[offset];
@@ -406,7 +406,7 @@ static unsigned char Vox_GetVoxel(VoxArray3D* pvoxarray, int x, int y, int z)
 
 	//if (offset > chunk->arraySize)
 	//{
-	//	TraceLog(LOG_ERROR, "Out of array");
+	//	RL_TraceLog(LOG_ERROR, "Out of array");
 	//}
 	return chunk->m_array[offset];
 
@@ -451,12 +451,12 @@ static unsigned char Vox_CalcFacesVisible(VoxArray3D* pvoxArray, int cx, int cy,
 static VoxVector3 Vox_GetVertexPosition(int _wcx, int _wcy, int _wcz, int _nNumVertex)
 {
 	float scale = 0.25;
-    
+
 	VoxVector3 vtx = SolidVertex[_nNumVertex];
 	vtx.x = (vtx.x + _wcx) * scale;
 	vtx.y = (vtx.y + _wcy) * scale;
 	vtx.z = (vtx.z + _wcz) * scale;
-    
+
 	return vtx;
 }
 
@@ -591,7 +591,7 @@ int Vox_LoadFromMemory(unsigned char* pvoxData, unsigned int voxDataSize, VoxArr
 
 		if (strcmp(szChunkName, "SIZE") == 0)
 		{
-			//(4 bytes x 3 : x, y, z ) 
+			//(4 bytes x 3 : x, y, z )
 			sizeX = *((unsigned int*)fileDataPtr);
 			fileDataPtr += sizeof(unsigned int);
 
@@ -648,7 +648,7 @@ int Vox_LoadFromMemory(unsigned char* pvoxData, unsigned int voxDataSize, VoxArr
 	}
 
 	//////////////////////////////////////////////////////////
-	// Building Mesh
+	// Building RL_Mesh
 	//   TODO compute globals indices array
 
 	// Init Arrays

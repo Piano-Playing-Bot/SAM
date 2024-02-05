@@ -1,14 +1,11 @@
-#ifndef MIDI_H_
-#define MIDI_H_
-
+#define AIL_ALL_IMPL
+#define AIL_FS_IMPL
+#define AIL_BUF_IMPL
 #include "common.h"
 #include <stdbool.h> // For boolean definitions
 #include <stdlib.h>  // For malloc, memcpy
-#define AIL_ALL_IMPL
 #include "ail.h"
-#define AIL_FS_IMPL
 #include "ail_fs.h"
-#define AIL_BUF_IMPL
 #include "ail_buf.h"
 
 typedef union {
@@ -42,11 +39,6 @@ u32 read_var_len(AIL_Buffer *buffer);
 ParseMidiRes parse_midi(AIL_Buffer buffer);
 void write_midi(Song song, char *fpath);
 
-#endif // MIDI_H_
-
-#ifdef MIDI_IMPL
-#ifndef _MIDI_IMPL_GUARD_
-#define _MIDI_IMPL_GUARD_
 
 // Code taken from MIDI Standard
 u32 read_var_len(AIL_Buffer *buffer)
@@ -63,7 +55,8 @@ u32 read_var_len(AIL_Buffer *buffer)
 
 ParseMidiRes parse_midi(AIL_Buffer buffer)
 {
-    ParseMidiResVal val = {0};
+    ParseMidiResVal val = { 0 };
+    val.song.chunks     = ail_da_new(MusicChunk);
     #define midiFileStartLen 8
     const char midiFileStart[midiFileStartLen] = {'M', 'T', 'h', 'd', 0, 0, 0, 6};
 
@@ -358,6 +351,3 @@ void write_midi(Song song, char *fpath)
 
     ail_buf_to_file(&buffer, fpath);
 }
-
-#endif // _MIDI_IMPL_GUARD_
-#endif // MIDI_IMPL
