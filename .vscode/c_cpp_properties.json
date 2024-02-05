@@ -3,8 +3,8 @@
         {
             "name": "Win32",
             "includePath": [
-                "${workspaceFolder}/**",
-                "${vcpkgRoot}/installed/x64-windows/include"
+                "${workspaceFolder}/../**",
+                "${workspaceFolder}/**"
             ],
             "defines": [
                 "_DEBUG",
@@ -20,8 +20,8 @@
         {
             "name": "MinGW",
             "includePath": [
-                "${workspaceFolder}/**",
-                "${vcpkgRoot}/installed/x64-windows/include"
+                "${workspaceFolder}/../**",
+                "${workspaceFolder}/**"
             ],
             "defines": [
                 "_DEBUG",
@@ -36,8 +36,8 @@
         {
             "name": "Win (clang)",
             "includePath": [
+                "${workspaceFolder}/../**",
                 "${workspaceFolder}/**",
-                "${vcpkgRoot}/installed/x64-windows/include"
             ],
             "defines": [
                 "_DEBUG",
@@ -52,6 +52,7 @@
         {
             "name": "GNU/Linux",
             "includePath": [
+                "${workspaceFolder}/../**",
                 "${workspaceFolder}/**"
             ],
             "defines": [
@@ -67,6 +68,7 @@
         {
             "name": "Linux (clang)",
             "includePath": [
+                "${workspaceFolder}/../**",
                 "${workspaceFolder}/**"
             ],
             "defines": [
@@ -82,6 +84,7 @@
         {
             "name": "Mac",
             "includePath": [
+                "${workspaceFolder}/../**",
                 "${workspaceFolder}/**"
             ],
             "defines": [
