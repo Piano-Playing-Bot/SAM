@@ -2,7 +2,7 @@
 
 CC        = gcc
 MODE     ?= DEBUG
-CFLAGS   ?= -Wall -Wextra -Wpedantic -std=c99 -Wno-unused-function -std=c99
+CFLAGS   ?= -Wall -Wextra -Wpedantic -std=c99 -Wno-unused-function
 
 COMMON_PATH = ../common/
 
@@ -21,10 +21,13 @@ CFLAGS   += $(INCLUDES) $(LIBS)
 
 .PHONY: clean main
 
-all: main
+all: main test
 
 main: src/main.c raylib
 	$(CC) -o bin/main src/main.c $(CFLAGS)
+
+test: src/test.c
+	$(CC) -o test src/test.c $(CFLAGS)
 
 export PLATFORM=PLATFORM_DESKTOP
 export RAYLIB_LIBTYPE=STATIC
