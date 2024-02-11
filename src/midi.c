@@ -38,7 +38,21 @@ typedef struct { // See definition in Spec
 u32 read_var_len(AIL_Buffer *buffer);
 ParseMidiRes parse_midi(AIL_Buffer buffer);
 void write_midi(Song song, char *fpath);
+void sort_chunks(AIL_DA(MusicChunk) chunks);
 
+
+void sort_chunks(AIL_DA(MusicChunk) chunks)
+{
+    for (u32 i = 0; i < chunks.len - 1; i++) {
+        u32 min = i;
+        for (u32 j = i + 1; j < chunks.len; j++) {
+            if (chunks.data[j].time < chunks.data[min].time) min = j;
+        }
+        MusicChunk tmp = chunks.data[i];
+        chunks.data[i] = chunks.data[min];
+        chunks.data[min] = tmp;
+    }
+}
 
 // Code taken from MIDI Standard
 u32 read_var_len(AIL_Buffer *buffer)
@@ -55,8 +69,8 @@ u32 read_var_len(AIL_Buffer *buffer)
 
 ParseMidiRes parse_midi(AIL_Buffer buffer)
 {
-    ParseMidiResVal val = { 0 };
-    val.song.chunks     = ail_da_new(MusicChunk);
+    ParseMidiResVal val = {0};
+    val.song.chunks = ail_da_new_with_cap(MusicChunk, 256);
     #define midiFileStartLen 8
     const char midiFileStart[midiFileStartLen] = {'M', 'T', 'h', 'd', 0, 0, 0, 6};
 
@@ -185,7 +199,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                 if (ail_buf_peek1(buffer) & 0x80) {
                     command = (ail_buf_peek1(buffer) & 0xf0) >> 4;
                     channel = ail_buf_read1(&buffer) & 0x0f;
-                    DBG_LOG("New Satus - ");
+                    DBG_LOG("New Status - ");
                 } else {
                     DBG_LOG("Running Status - ");
                 }
@@ -206,6 +220,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                         u64 chunk_end = chunk.time + chunk.len;
                         if (AIL_LIKELY(chunk_end > val.song.len)) val.song.len = chunk_end;
                         ail_da_push(&val.song.chunks, chunk);
+                        printf("Note: key=%d, velocity=%d, on=%d, ticks=%d\n", key, velocity, chunk.on, ticks);
                     } break;
                     case 0xA: {
                         // Polyphonic Key Pressure
@@ -274,12 +289,17 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
         }
     }
 
+    sort_chunks(val.song.chunks);
+
     return (ParseMidiRes) { true, val };
 }
 
 void write_midi(Song song, char *fpath)
 {
+    DBG_LOG("Writing %s back to midi in %s\n", song.name, fpath);
     AIL_Buffer buffer = ail_buf_new(2048);
+    u16 ticksPQN = 480;
+    u32 tempo = 500000;
     ail_buf_write1(&buffer, 'M');
     ail_buf_write1(&buffer, 'T');
     ail_buf_write1(&buffer, 'h');
@@ -287,7 +307,7 @@ void write_midi(Song song, char *fpath)
     ail_buf_write4msb(&buffer, 6);
     ail_buf_write2msb(&buffer, 0);
     ail_buf_write2msb(&buffer, 1);
-    ail_buf_write2msb(&buffer, 480);
+    ail_buf_write2msb(&buffer, ticksPQN);
 
     ail_buf_write1(&buffer, 'M');
     ail_buf_write1(&buffer, 'T');
@@ -297,8 +317,9 @@ void write_midi(Song song, char *fpath)
     buffer.idx += 4;
 
     ail_buf_write3msb(&buffer, 0x00ff03); // delta_time + Status for name
-    ail_buf_write1(&buffer, strlen(song.name));
-    for (u8 i = 0; i < (u8)strlen(song.name); i++) ail_buf_write1(&buffer, song.name[i]);
+    char *trackname = "Grand Piano";
+    ail_buf_write1(&buffer, strlen(trackname));
+    ail_buf_writestr(&buffer, trackname, strlen(trackname));
 
     ail_buf_write3msb(&buffer, 0x00ff58); // delta_time + Status for Time-Signature
     ail_buf_write1(&buffer, 4);
@@ -310,7 +331,7 @@ void write_midi(Song song, char *fpath)
     // Tempo
     ail_buf_write3msb(&buffer, 0x00ff51);
     ail_buf_write1(&buffer, 3);
-    ail_buf_write3msb(&buffer, 500000);
+    ail_buf_write3msb(&buffer, tempo);
 
     // Control Changes
     ail_buf_write4msb(&buffer, 0x00b07900);
@@ -328,18 +349,34 @@ void write_midi(Song song, char *fpath)
     ail_buf_write2msb(&buffer, 0x0100);
 
     // Notes
-    u64 last_time = 0;
+    u64 last_tick = 0;
     for (u32 i = 0; i < song.chunks.len; i++) {
         MusicChunk c = song.chunks.data[i];
-        u32 delta_time = c.time - last_time;
-        do {
-            ail_buf_write1(&buffer, delta_time & 0xff);
-            delta_time >>= 7;
-        } while (delta_time & 0x80);
-        last_time = c.time;
-        ail_buf_write1(&buffer, c.on ? 0x90 : 0x80);
+        u64 cur_tick = c.time / (u64)(((f32)tempo / (f32)ticksPQN) / 1000.0f);
+        u32 delta_time = cur_tick - last_tick;
+        printf("time: %lld, cur_tick: %lld, last_tick: %lld\n", c.time, cur_tick, last_tick);
+
+        // Write variable length field for delta_time
+        const u32 dt = delta_time;
+        u32 x = delta_time & 0x7f;
+        while ((delta_time >>= 7) > 0) {
+            x <<= 8;
+            x |= 0x80;
+            x += (delta_time & 0x7f);
+        }
+        while (true) {
+            ail_buf_write1(&buffer, (u8)x);
+            if (x & 0x80) x >>= 8;
+            else break;
+        }
+
+        DBG_LOG("index: %#010llx, delta_time: %lu\n", buffer.idx, dt);
+
+        last_tick = cur_tick;
+        // ail_buf_write1(&buffer, c.on ? 0x90 : 0x80);
+        if (i == 0) ail_buf_write1(&buffer, 0x90);
         ail_buf_write1(&buffer, (c.octave - MIDI_0KEY_OCTAVE)*PIANO_KEY_AMOUNT + c.key);
-        ail_buf_write1(&buffer, c.time);
+        ail_buf_write1(&buffer, c.len);
     }
 
     ail_buf_write4msb(&buffer, 0x01ff2f00);
@@ -350,4 +387,5 @@ void write_midi(Song song, char *fpath)
     buffer.idx  = cur_idx;
 
     ail_buf_to_file(&buffer, fpath);
+    DBG_LOG("Done writing midi file\n");
 }
