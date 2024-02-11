@@ -1,5 +1,4 @@
 #include "ail_alloc.h"
-#include "comm.c"
 #include "common.h"
 
 #define MSG_LEN 16
@@ -22,7 +21,11 @@ int main(void)
 	const char msg[MSG_LEN] = "SPPPPING    ";
 
 #if 1
-	void *file = CreateFile("COM4", GENERIC_READ | GENERIC_WRITE, 0, 0, OPEN_EXISTING, 0, 0);
+	// u64 fd;
+	// AIL_ASSERT(ail_fs_open_file("COM3", &fd, true));
+	// void *file = (void *)fd;
+
+	void *file = CreateFile("COM5", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, 0, OPEN_ALWAYS, 0, 0);
 	if (file == INVALID_HANDLE_VALUE) {
 		printf("Failed to open file\n");
 		return 1;
@@ -37,20 +40,28 @@ int main(void)
 	AIL_ASSERT(SetCommTimeouts(file, &timeouts));
 	AIL_ASSERT(SetCommMask(file, EV_RXCHAR));
 	DCB dcb = {
-		.DCBlength = sizeof(DCB),
-		.BaudRate  = BAUD_RATE,
+		.DCBlength    = sizeof(DCB),
+		.BaudRate     = BAUD_RATE,
+		.StopBits     = ONESTOPBIT,
+		.Parity       = (BYTE)PARITY_NONE,
+		.fOutxCtsFlow = false,
+    	.fRtsControl  = RTS_CONTROL_DISABLE,
+    	.fOutX        = false,
+    	.fInX         = false,
+		.EofChar      = EOF,
+		.ByteSize     = 8,
 	};
+
+	AIL_ASSERT(SetupComm(file, 4096, 4096));
 	AIL_ASSERT(SetCommState(file, &dcb));
 	DWORD written;
 	AIL_ASSERT(WriteFile(file, msg, MSG_LEN, &written, 0));
-	// DWORD eventMask;
-	// AIL_ASSERT(WaitCommEvent(file, &eventMask, 0));
 	DWORD read;
 	char reply[MSG_LEN] = {0};
 	AIL_ASSERT(ReadFile(file, reply, MSG_LEN, &read, 0));
 	printf("Received (len=%ld): '%s'\n", read, reply);
 	CloseHandle(file);
-
+	return 0;
 #else
 	u64 fd;
 	if (ail_fs_open_file("COM4", &fd, true)) {
