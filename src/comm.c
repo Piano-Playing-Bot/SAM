@@ -16,7 +16,7 @@
 #define CONN_CHECK_TIMEOUT 1000 // in ms
 
 // @Note: Only find_server_port writes this value
-static u64 ArduinoPort = 0;
+static void *ArduinoPort = 0;
 // @Note: Only check_connection_daemon writes this value
 static bool IsArduinoConnected = false;
 
@@ -29,6 +29,7 @@ typedef struct ThreadedSendMsgInput {
 // @Note: Function is thread-safe and ensures that only ever one thread is using the Serial interface of the Arduino
 bool send_msg(ClientMsg msg) {
 	static pthread_mutex_t ArduinoPortMutex = PTHREAD_MUTEX_INITIALIZER;
+	u8 reply[MAX_SERVER_MSG_SIZE]     = {0};
 	u8 msgBuffer[MAX_CLIENT_MSG_SIZE] = {0};
 	AIL_Buffer buffer = {
 		.data = msgBuffer,
@@ -53,21 +54,43 @@ bool send_msg(ClientMsg msg) {
 			ail_buf_write4lsb(&buffer, 0x20202020);
 			break;
 	}
-	printf("Sending message (len=%lld): '%s'\n", buffer.len, (char *)buffer.data); // @Cleanup
+
 
 	while (pthread_mutex_lock(&ArduinoPortMutex) != 0) ail_time_sleep(50);
-	printf("Writing...\n"); // @Nocheckin
-	if (!ail_fs_write_n_bytes(ArduinoPort, (char *)buffer.data, buffer.len)) return false;
-	u64 len;
-	u8 reply[MAX_SERVER_MSG_SIZE];
-	printf("Reading...\n"); // @Nocheckin
-	if (!ail_fs_read_n_bytes(ArduinoPort, reply, MAX_SERVER_MSG_SIZE, &len)) return false;
-	printf("Received reply: '%s'\n", reply); // @Cleanup
 
+	COMMTIMEOUTS timeouts = {
+		.ReadIntervalTimeout         = 50,
+		.ReadTotalTimeoutConstant    = 50,
+		.ReadTotalTimeoutMultiplier  = 10,
+		.WriteTotalTimeoutConstant   = 50,
+		.WriteTotalTimeoutMultiplier = 10,
+	};
+	if (!SetCommTimeouts(ArduinoPort, &timeouts)) goto done;
+	if (!SetCommMask(ArduinoPort, EV_RXCHAR)) goto done;
+	DCB dcb = {
+		.DCBlength    = sizeof(DCB),
+		.BaudRate     = BAUD_RATE,
+		.StopBits     = ONESTOPBIT,
+		.Parity       = (BYTE)PARITY_NONE,
+		.fOutxCtsFlow = false,
+    	.fRtsControl  = RTS_CONTROL_DISABLE,
+    	.fOutX        = false,
+    	.fInX         = false,
+		.EofChar      = EOF,
+		.ByteSize     = 8,
+	};
+	if (!SetupComm(ArduinoPort, 4096, 4096)) goto done;
+	if (!SetCommState(ArduinoPort, &dcb)) goto done;
+	DWORD written;
+	if (!WriteFile(ArduinoPort, buffer.data, buffer.len, &written, 0)) goto done;
+	DWORD read;
+	if (!ReadFile(ArduinoPort, reply, MAX_SERVER_MSG_SIZE, &read, 0)) goto done;
+
+done:
 	while (pthread_mutex_unlock(&ArduinoPortMutex) != 0) {}
 
 
-	if (len < 8) return false;
+	if (read < 8) return false;
 	if (msg.type == MSG_PING) {
 		return memcmp(reply, "SPPPPONG", 8) == 0;
 	} else {
@@ -91,8 +114,8 @@ void find_server_port(AIL_Allocator *allocator)
     ClientMsg ping = { .type = MSG_PING };
 	if (ArduinoPort) {
 		if (send_msg(ping)) return;
-		ail_fs_close_file(ArduinoPort);
-		ArduinoPort = 0;
+		CloseHandle(ArduinoPort);
+		ArduinoPort = NULL;
 	}
 
 	unsigned long ports_amount = 0;
@@ -111,13 +134,15 @@ void find_server_port(AIL_Allocator *allocator)
 		bool port_is_rw  = port.fPortType & PORT_TYPE_READ && port.fPortType & PORT_TYPE_WRITE;
 		bool port_is_usb = strlen(port.pPortName) >= 3 && memcmp(port.pPortName, "COM", 3) == 0;
         if (port_is_rw && port_is_usb) {
-            if (ail_fs_open_file(port.pPortName, &ArduinoPort, true)) {
+			ArduinoPort = CreateFile(port.pPortName, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+			if (ArduinoPort != INVALID_HANDLE_VALUE) {
+				printf("Checking port '%s'...\n", port.pPortName);
                 if (send_msg(ping)) goto done;
-                ail_fs_close_file(ArduinoPort);
-            }
+                CloseHandle(ArduinoPort);
+			}
         }
     }
-	ArduinoPort = 0;
+	ArduinoPort = NULL;
 done:
     allocator->free_one(allocator->data, ports);
 }
@@ -127,7 +152,7 @@ void *check_connection_daemon(void *allocator)
 	AIL_Allocator *al = allocator;
 	while (true) {
 		find_server_port(al);
-		IsArduinoConnected = ArduinoPort != 0;
+		IsArduinoConnected = ArduinoPort != NULL;
 		ail_time_sleep(CONN_CHECK_TIMEOUT);
 	}
 	return NULL;
