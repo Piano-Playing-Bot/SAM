@@ -220,6 +220,7 @@ int main(void)
         if (AIL_UNLIKELY(scroll < 0.0f)) scroll = 0.0f;
 
         switch(view) {
+            // @TODO: Display song timeline at the bottom (allowing user to jump back and forth on it)
             case UI_VIEW_LIBRARY: {
                 static bool loaded_lib_in_prev_frame = false;
                 if (requires_recalc) {
@@ -315,7 +316,14 @@ int main(void)
                         AIL_Gui_State song_label_state = ail_gui_drawLabelOuterBounds(song_label, content_bounds);
                         if (song_label_state == AIL_GUI_STATE_PRESSED) {
                             DBG_LOG("Playing song: %s\n", song_name);
-                            // @TODO: Send song to arduino & change view
+                            // @Performance: Sending message might take a while and should maybe be offloaded to a seperate thread
+                            // @TODO: Show error message if arduino is not connected or no SPPPSUCC message was received
+                            ClientMsg msg = {
+                                .type   = MSG_PIDI,
+                                .n      = songs.data[i].chunks.len,
+                                .chunks = songs.data[i].chunks.data,
+                            };
+                            send_msg(msg);
                         }
                     }
                 }
@@ -415,6 +423,8 @@ int main(void)
             RL_Vector2 pos = { win_width - width - pad, win_height - size_smaller - pad };
             RL_DrawTextEx(font, text, pos, size_smaller, spacing, color);
         }
+
+        RL_DrawFPS(10, 10); // @Cleanup
 
         RL_EndDrawing();
         ail_gui_allocator.free_all(ail_gui_allocator.data);

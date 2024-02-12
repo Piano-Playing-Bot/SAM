@@ -37,7 +37,7 @@ typedef struct { // See definition in Spec
 
 u32 read_var_len(AIL_Buffer *buffer);
 ParseMidiRes parse_midi(AIL_Buffer buffer);
-void write_midi(Song song, char *fpath);
+void write_midi(Song song, const char *fpath);
 void sort_chunks(AIL_DA(MusicChunk) chunks);
 
 
@@ -220,7 +220,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                         u64 chunk_end = chunk.time + chunk.len;
                         if (AIL_LIKELY(chunk_end > val.song.len)) val.song.len = chunk_end;
                         ail_da_push(&val.song.chunks, chunk);
-                        printf("Note: key=%d, velocity=%d, on=%d, ticks=%d\n", key, velocity, chunk.on, ticks);
+                        printf("Note: key=%d, velocity=%d, on=%d, ticks=%lld\n", key, velocity, chunk.on, ticks);
                     } break;
                     case 0xA: {
                         // Polyphonic Key Pressure
@@ -294,7 +294,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
     return (ParseMidiRes) { true, val };
 }
 
-void write_midi(Song song, char *fpath)
+void write_midi(Song song, const char *fpath)
 {
     DBG_LOG("Writing %s back to midi in %s\n", song.name, fpath);
     AIL_Buffer buffer = ail_buf_new(2048);
@@ -370,7 +370,7 @@ void write_midi(Song song, char *fpath)
             else break;
         }
 
-        DBG_LOG("index: %#010llx, delta_time: %lu\n", buffer.idx, dt);
+        DBG_LOG("index: %#010llx, delta_time: %u\n", buffer.idx, dt);
 
         last_tick = cur_tick;
         // ail_buf_write1(&buffer, c.on ? 0x90 : 0x80);

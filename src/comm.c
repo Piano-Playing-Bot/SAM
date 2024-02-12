@@ -55,7 +55,6 @@ bool send_msg(ClientMsg msg) {
 			break;
 	}
 
-
 	while (pthread_mutex_lock(&ArduinoPortMutex) != 0) ail_time_sleep(50);
 
 	COMMTIMEOUTS timeouts = {
@@ -89,6 +88,7 @@ bool send_msg(ClientMsg msg) {
 done:
 	while (pthread_mutex_unlock(&ArduinoPortMutex) != 0) {}
 
+	printf("Received reply (len=%lu): '%s'\n", read, reply);
 
 	if (read < 8) return false;
 	if (msg.type == MSG_PING) {
