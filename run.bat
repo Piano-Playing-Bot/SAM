@@ -1,6 +1,6 @@
 :: Run "run.bat r" to remove the data directory before running rl.exe
 
-@call make all
+@call make main
 @echo off
 if %errorLevel%==0 (
 	pushd bin
