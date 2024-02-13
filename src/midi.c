@@ -23,18 +23,6 @@ typedef struct {
 
 #define MIDI_0KEY_OCTAVE -5
 
-typedef struct {
-    u8 num;    // Numerator
-    u8 den;    // Denominator expressed as a (negative) power of 2
-    u8 clocks; // Number of MIDI-Clocks in a metronome click
-    u8 b;      // Number of notate 32nd notes in quarter-notes (aka in 24 MIDI-Clocks)
-} MIDI_Time_Signature;
-
-typedef struct { // See definition in Spec
-    i8 sf;
-    i8 mi;
-} MIDI_Key_Signature;
-
 u32 read_var_len(AIL_Buffer *buffer);
 ParseMidiRes parse_midi(AIL_Buffer buffer);
 void write_midi(Song song, const char *fpath);
@@ -81,14 +69,6 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
     buffer.idx += midiFileStartLen;
 
     u32 tempo = 500000; // in ms. 500000ms = 120BPM (default value)
-    MIDI_Time_Signature time_signature = { // Initialized to 4/4
-        .num = 4,
-        .den = 2,
-        .clocks = 18,
-        .b = 8,
-    };
-    MIDI_Key_Signature key_signature = {0};
-
     u16 format   = ail_buf_read2msb(&buffer);
     u16 ntrcks   = ail_buf_read2msb(&buffer);
     u16 ticksPQN = ail_buf_read2msb(&buffer);
@@ -116,74 +96,70 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
         while (buffer.idx < chunk_end) {
             // Parse MTrk events
             u32 delta_time = read_var_len(&buffer);
-            DBG_LOG("index: %#010llx, delta_time: %d\n", buffer.idx, delta_time);
+            // DBG_LOG("index: %#010llx, delta_time: %d\n", buffer.idx, delta_time);
             ticks += delta_time;
             if (ail_buf_peek1(buffer) == 0xff) {
                 buffer.idx++;
                 // Meta Event
                 switch (ail_buf_read1(&buffer)) {
-                    case 0x00: {
-                        AIL_TODO();
+                    case 0x00: { // Sequence Number - ignored
+                        AIL_ASSERT(ail_buf_read1(&buffer) == 2);
+                        buffer.idx += 2;
                     } break;
-                    case 0x01: {
-                        AIL_TODO();
-                    } break;
-                    case 0x02: {
-                        AIL_TODO();
-                    } break;
-                    case 0x03: { // Sequence/Track Name - ignored
+                    case 0x01:   // Text Event          - ignored
+                    case 0x02:   // Copyright Notice    - ignored
+                    case 0x03:   // Sequence/Track Name - ignored
+                    case 0x04:   // Instrument Name     - ignored
+                    case 0x05:   // Lyric               - ignored
+                    case 0x06:   // Marker              - ignored
+                    case 0x07: { // Cue Point           - ignored
                         u32 len = read_var_len(&buffer);
                         buffer.idx += len;
                     } break;
-                    case 0x04: {
-                        AIL_TODO();
+                    case 0x20: { // MIDI Channel Prefix - ignored for now
+                        // @Note: This secified that the next events only effect this specific channel
+                        // @TODO: This should be handled if there are any events that may effect one channel and should not effect the notes from other channels
+                        AIL_ASSERT(ail_buf_read1(&buffer) == 1);
+                        buffer.idx++;
                     } break;
-                    case 0x05: {
-                        AIL_TODO();
-                    } break;
-                    case 0x06: {
-                        AIL_TODO();
-                    } break;
-                    case 0x07: {
-                        AIL_TODO();
-                    } break;
-                    case 0x20: {
-                        AIL_TODO();
-                    } break;
-                    case 0x2f: {
-                        // End of Track
+                    case 0x2f: { // End of Track - ignored
                         AIL_ASSERT(ail_buf_read1(&buffer) == 0);
                         AIL_ASSERT(buffer.idx == chunk_end);
                     } break;
-                    case 0x51: {
-                        // @TODO: This is a change of tempo and should thus be recorded for the track somehow
+                    case 0x51: { // Set Tempo
                         AIL_ASSERT(ail_buf_read1(&buffer) == 3);
+                        // u32 x = ail_buf_read3msb(&buffer);
                         tempo = ail_buf_read3msb(&buffer);
-                        DBG_LOG("tempo: %d\n", tempo);
+                        DBG_LOG("tempo: %u\n", tempo);
                     } break;
-                    case 0x54: {
+                    case 0x54: { // SMPTE Offset
+                        AIL_ASSERT(ail_buf_read1(&buffer) == 5);
+                        u8 hr = ail_buf_read1(&buffer);
+                        u8 mn = ail_buf_read1(&buffer);
+                        u8 se = ail_buf_read1(&buffer);
+                        u8 fr = ail_buf_read1(&buffer);
+                        u8 ff = ail_buf_read1(&buffer);
+                        // > This event, if present, designates the SMPTE time at which the track chunk is supposed to start
+                        // @Study: Can we ignore this event?
+                        DBG_LOG("SMPTE - hour: %u, min: %u, sec: %u, fr: %u, ff: %u\n", hr, mn, se, fr, ff);
                         AIL_TODO();
                     } break;
-                    case 0x58: { // Time Signature - important
+                    case 0x58: { // Time Signature - ignored
                         AIL_ASSERT(ail_buf_read1(&buffer) == 4);
-                        time_signature = (MIDI_Time_Signature) {
-                            .num    = ail_buf_read1(&buffer),
-                            .den    = ail_buf_read1(&buffer),
-                            .clocks = ail_buf_read1(&buffer),
-                            .b      = ail_buf_read1(&buffer),
-                        };
-                        DBG_LOG("time_signature: (%d, %d, %d, %d)\n", time_signature.num, time_signature.den, time_signature.clocks, time_signature.b);
+                        buffer.idx += 2; // ignore num/den
+                        // ticksPQN = ail_buf_read1(&buffer);
+                        // u8 b = ail_buf_read1(&buffer);
+                        // DBG_LOG("b: %u\n", b); // @Bug
+                        buffer.idx += 2;
+                        // AIL_ASSERT(b == 8); // It would be weird if there's not exactly 8 32nd notes ber quarter-note
                     } break;
-                    case 0x59: {
+                    case 0x59: { // Key Signature - ignored
                         AIL_ASSERT(ail_buf_read1(&buffer) == 2);
-                        key_signature = (MIDI_Key_Signature) {
-                            .sf = (i8) ail_buf_read1(&buffer),
-                            .mi = (i8) ail_buf_read1(&buffer),
-                        };
-                        DBG_LOG("key_signature: (%d, %d)\n", key_signature.sf, key_signature.mi);
+                        buffer.idx += 2;
                     } break;
-                    case 0x7f: {
-                        AIL_TODO();
+                    case 0x7f: { // Sequencer-Specific Meta-Event - ignored
+                        u32 len = read_var_len(&buffer);
+                        buffer.idx += len;
                     } break;
                     default: {
                         buffer.idx -= 2;
@@ -199,56 +175,47 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                 if (ail_buf_peek1(buffer) & 0x80) {
                     command = (ail_buf_peek1(buffer) & 0xf0) >> 4;
                     channel = ail_buf_read1(&buffer) & 0x0f;
-                    DBG_LOG("New Status - ");
+                    // DBG_LOG("New Status - ");
                 } else {
-                    DBG_LOG("Running Status - ");
+                    // DBG_LOG("Running Status - ");
                 }
-                DBG_LOG("Command: %#01x, Channel: %#01x\n", command, channel);
+                // DBG_LOG("Command: %#01x, Channel: %#01x\n", command, channel);
                 switch (command) {
                     case 0x8:
-                    case 0x9: {
-                        // Note off / on
+                    case 0x9: { // Note off / on
                         u8 key      = ail_buf_read1(&buffer);
                         u8 velocity = ail_buf_read1(&buffer);
                         MusicChunk chunk = {
-                            .time   = ticks * (u64)(((f32)tempo / (f32)ticksPQN) / 1000.0f),
-                            .len    = velocity, // @Study: Is this correct?
-                            .key    = key % PIANO_KEY_AMOUNT,
-                            .octave = MIDI_0KEY_OCTAVE + (key / PIANO_KEY_AMOUNT),
-                            .on     = command == 0x9 && velocity != 0,
+                            .time     = ticks * (u64)(((f32)tempo / (f32)ticksPQN) / 1000.0f),
+                            .velocity = velocity,
+                            .key      = key % PIANO_KEY_AMOUNT,
+                            .octave   = MIDI_0KEY_OCTAVE + (key / PIANO_KEY_AMOUNT),
+                            .on       = command == 0x9 && velocity != 0,
                         };
-                        u64 chunk_end = chunk.time + chunk.len;
-                        if (AIL_LIKELY(chunk_end > val.song.len)) val.song.len = chunk_end;
                         ail_da_push(&val.song.chunks, chunk);
-                        printf("Note: key=%d, velocity=%d, on=%d, ticks=%lld\n", key, velocity, chunk.on, ticks);
+                        // DBG_LOG("Note: key=%d, velocity=%d, on=%d, ticks=%lld\n", key, velocity, chunk.on, ticks);
                     } break;
-                    case 0xA: {
-                        // Polyphonic Key Pressure
+                    case 0xA: { // Polyphonic Key Pressure
                         AIL_TODO();
                     } break;
-                    case 0xB: {
-                        // Control Change
+                    case 0xB: { // Control Change
                         u8 c = ail_buf_read1(&buffer);
                         u8 v = ail_buf_read1(&buffer);
-                        DBG_LOG("Control Change: c = %#01x, v = %#01x\n", c, v);
+                        // DBG_LOG("Control Change: c = %#01x, v = %#01x\n", c, v);
                         AIL_ASSERT(v <= 127);
                         if (c < 120) {
                             // Do nothing for now
                             // @TODO: Check if any messages here might be interesting for us
                         } else switch (c) {
-                            case 120: {
-                                // All Sound off
+                            case 120: { // All Sound off @TODO
                                 AIL_TODO();
                             } break;
-                            case 121: {
-                                // Reset all controllers
-                                // Do nothing
+                            case 121: { // Reset all controllers - ignored
                             } break;
                             case 122: {
                                 AIL_TODO();
                             } break;
-                            case 123: {
-                                // All Notes off
+                            case 123: { // All Notes off
                                 AIL_TODO();
                             } break;
                             case 124: {
@@ -266,22 +233,18 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                             default: AIL_UNREACHABLE();
                         }
                     } break;
-                    case 0xC: {
-                        // Program Change
+                    case 0xC: { // Program Change - ignored
                         u8 patch = ail_buf_read1(&buffer);
                         DBG_LOG("Program Change: patch = %d\n", patch);
                         // Do nothing
                     } break;
-                    case 0xD: {
-                        // Channel Pressure
+                    case 0xD: { // Channel Pressure
                         AIL_TODO();
                     } break;
-                    case 0xE: {
-                        // Pitch Bend Change.
+                    case 0xE: { // Pitch Bend Change
                         AIL_TODO();
                     } break;
-                    case 0xF: {
-                        // System Common Messages
+                    case 0xF: { // System Common Messages
                         AIL_TODO();
                     } break;
                 }
@@ -290,6 +253,12 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
     }
 
     sort_chunks(val.song.chunks);
+    if (!val.song.chunks.len) val.song.len = 0;
+    else {
+        AIL_DA(MusicChunk) chunks = val.song.chunks;
+        AIL_ASSERT(!chunks.data[chunks.len - 1].on);
+        val.song.len = chunks.data[chunks.len - 1].time;
+    }
 
     return (ParseMidiRes) { true, val };
 }
@@ -299,7 +268,7 @@ void write_midi(Song song, const char *fpath)
     DBG_LOG("Writing %s back to midi in %s\n", song.name, fpath);
     AIL_Buffer buffer = ail_buf_new(2048);
     u16 ticksPQN = 480;
-    u32 tempo = 500000;
+    u32 tempo = 705882; // 500000;
     ail_buf_write1(&buffer, 'M');
     ail_buf_write1(&buffer, 'T');
     ail_buf_write1(&buffer, 'h');
@@ -354,7 +323,7 @@ void write_midi(Song song, const char *fpath)
         MusicChunk c = song.chunks.data[i];
         u64 cur_tick = c.time / (u64)(((f32)tempo / (f32)ticksPQN) / 1000.0f);
         u32 delta_time = cur_tick - last_tick;
-        printf("time: %lld, cur_tick: %lld, last_tick: %lld\n", c.time, cur_tick, last_tick);
+        // DBG_LOG("time: %lld, cur_tick: %lld, last_tick: %lld\n", c.time, cur_tick, last_tick);
 
         // Write variable length field for delta_time
         const u32 dt = delta_time;
@@ -370,13 +339,13 @@ void write_midi(Song song, const char *fpath)
             else break;
         }
 
-        DBG_LOG("index: %#010llx, delta_time: %u\n", buffer.idx, dt);
+        // DBG_LOG("index: %#010llx, delta_time: %u\n", buffer.idx, dt);
 
         last_tick = cur_tick;
         // ail_buf_write1(&buffer, c.on ? 0x90 : 0x80);
         if (i == 0) ail_buf_write1(&buffer, 0x90);
         ail_buf_write1(&buffer, (c.octave - MIDI_0KEY_OCTAVE)*PIANO_KEY_AMOUNT + c.key);
-        ail_buf_write1(&buffer, c.len);
+        ail_buf_write1(&buffer, c.velocity);
     }
 
     ail_buf_write4msb(&buffer, 0x01ff2f00);

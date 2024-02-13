@@ -63,12 +63,13 @@ int main(int argc, char *argv[])
 	if (!res.succ) {
 		printf("Error: %s\n", res.val.err);
 	} else {
-		char *songname = fname(input);
-		res.val.song.name = songname;
-		const char *outfile = stradd(outdir, songname);
-		remove(outfile);
-		if (outdir) write_midi(res.val.song, outfile);
-		else print_song(res.val.song);
+		if (outdir) {
+			char *songname = fname(input);
+			res.val.song.name = songname;
+			const char *outfile = stradd(outdir, songname);
+			remove(outfile);
+			write_midi(res.val.song, outfile);
+		} else print_song(res.val.song);
 	}
 	return 0;
 }
