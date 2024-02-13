@@ -89,6 +89,10 @@ int main(void)
     u8 search_text_buffer[1024] = {0};
     AIL_Allocator search_text_allocator = ail_alloc_buffer_new(1024, search_text_buffer);
 
+    bool is_music_playing = false;
+    f64 cur_music_time = 0; // in ms
+    f64 cur_music_len  = 0; // in ms
+
     i32 win_width  = 1200;
     i32 win_height = 600;
     RL_SetConfigFlags(FLAG_WINDOW_RESIZABLE);
@@ -168,7 +172,7 @@ int main(void)
         .vAlign       = AIL_GUI_ALIGN_C,
     };
 
-    RL_Rectangle header_bounds, content_bounds;
+    RL_Rectangle header_bounds, content_bounds, play_bounds;
     AIL_Gui_Label centered_label = {
         .text         = ail_da_new_empty(char),
         .defaultStyle = style_default,
@@ -200,8 +204,23 @@ int main(void)
             win_width  = RL_GetScreenWidth();
             win_height = RL_GetScreenHeight();
             u32 header_pad = 5;
-            header_bounds  = (RL_Rectangle) { header_pad, 0, win_width - 2*header_pad, AIL_CLAMP(win_height / 10, size_max + 30, size_max*2) };
-            content_bounds = (RL_Rectangle) { header_bounds.x, header_bounds.y + header_bounds.height, header_bounds.width, win_height - header_bounds.y - header_bounds.height };
+            // Bounds of Header at top
+            header_bounds  = (RL_Rectangle) {
+                .x = header_pad,
+                .y = 0,
+                .width  = win_width - 2*header_pad,
+                .height = AIL_CLAMP(win_height / 10, size_max + 30, size_max*2)
+            };
+            // Bounds of Player-Timeline / General Footer
+            play_bounds.width  = header_bounds.width;
+            play_bounds.height = AIL_CLAMP(win_height / 10, size_max + 30, size_max*2);
+            play_bounds.x = header_bounds.x;
+            play_bounds.y = win_height - play_bounds.height;
+            // Bounds of Song Library
+            content_bounds.x = header_bounds.x;
+            content_bounds.y = header_bounds.y + header_bounds.height;
+            content_bounds.width  = header_bounds.width;
+            content_bounds.height = win_height - content_bounds.y - play_bounds.height;
         }
         RL_ClearBackground(BG_COLOR);
         SetMouseCursor(MOUSE_CURSOR_DEFAULT);
@@ -284,7 +303,6 @@ int main(void)
                     } else if (!songs.data) songs = library;
 
 
-                    // @TODO: Add search bar
                     static const u32 song_name_width  = 200;
                     static const u32 song_name_height = 150;
                     static const u32 song_name_margin = 50;
@@ -317,15 +335,43 @@ int main(void)
                         if (song_label_state == AIL_GUI_STATE_PRESSED) {
                             DBG_LOG("Playing song: %s\n", song_name);
                             // @Performance: Sending message might take a while and should maybe be offloaded to a seperate thread
-                            // @TODO: Show error message if arduino is not connected or no SPPPSUCC message was received
+                            // @TODO: Display hover style of songs differently if not connected maybe?
                             ClientMsg msg = {
                                 .type   = MSG_PIDI,
                                 .n      = songs.data[i].chunks.len,
                                 .chunks = songs.data[i].chunks.data,
                             };
-                            send_msg(msg);
+                            if (send_msg(msg) || true) {
+                                is_music_playing = true;
+                                cur_music_len    = songs.data[i].len;
+                                cur_music_time   = 0;
+                            } else {
+                                // @TODO: Show some kind of error
+                                is_music_playing = false;
+                            }
                         }
                     }
+                }
+                if (is_music_playing) {
+                    u32 play_timline_size = 10.0f;
+                    f32 play_circ_radius  = 2*play_timline_size;
+                    f32 played_perc = AIL_MAX(cur_music_time / cur_music_len, 1.0f);
+                    f32 x_circle    = AIL_LERP(played_perc, play_bounds.x, play_bounds.x + play_bounds.width);
+                    RL_Rectangle total_rect = {
+                        .x      = play_bounds.x,
+                        .y      = play_bounds.y + (play_timline_size - play_bounds.height)/2,
+                        .width  = play_bounds.width,
+                        .height = play_timline_size,
+                    };
+                    RL_Rectangle played_rect = total_rect;
+                    played_rect.width = x_circle - play_bounds.x;
+                    played_rect.height += 2.0f;
+
+                    DrawRectangleRounded(total_rect,  5.0f, 5, RL_GRAY);
+                    DrawRectangleRounded(played_rect, 5.0f, 5, RL_RED);
+                    DrawCircle(x_circle, play_bounds.y + total_rect.height/2, play_circ_radius, RL_RED);
+
+                    cur_music_time += RL_GetFrameTime() * 1000.0f;
                 }
             } break;
 
