@@ -88,7 +88,7 @@ bool send_msg(ClientMsg msg) {
 done:
 	while (pthread_mutex_unlock(&ArduinoPortMutex) != 0) {}
 
-	printf("Received reply (len=%lu): '%s'\n", read, reply);
+	// printf("Received reply (len=%lu): '%s'\n", read, reply);
 
 	if (read < 8) return false;
 	if (msg.type == MSG_PING) {
@@ -136,7 +136,7 @@ void find_server_port(AIL_Allocator *allocator)
         if (port_is_rw && port_is_usb) {
 			ArduinoPort = CreateFile(port.pPortName, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
 			if (ArduinoPort != INVALID_HANDLE_VALUE) {
-				printf("Checking port '%s'...\n", port.pPortName);
+				// printf("Checking port '%s'...\n", port.pPortName);
                 if (send_msg(ping)) goto done;
                 CloseHandle(ArduinoPort);
 			}

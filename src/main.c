@@ -357,23 +357,56 @@ int main(void)
                     }
                 }
                 if (is_music_playing) {
+                    static bool timeline_selected = false;
                     u32 play_timline_size = 10.0f;
                     f32 play_circ_radius  = 2*play_timline_size;
-                    f32 played_perc = AIL_MAX(cur_music_time / cur_music_len, 1.0f);
-                    f32 x_circle    = AIL_LERP(played_perc, play_bounds.x, play_bounds.x + play_bounds.width);
+                    f32 played_perc = AIL_MIN(cur_music_time / cur_music_len, 1.0f);
                     RL_Rectangle total_rect = {
                         .x      = play_bounds.x,
-                        .y      = play_bounds.y + (play_timline_size - play_bounds.height)/2,
+                        .y      = play_bounds.y + play_timline_size/2,
                         .width  = play_bounds.width,
                         .height = play_timline_size,
                     };
+
+                    RL_Vector2 mouse = GetMousePosition();
+                    f32 x_circle;
+                    if (timeline_selected) {
+                        SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+                        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                            x_circle = mouse.x;
+                        } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                            goto timeline_jump;
+                        }
+                    } else if (ail_gui_isPointInRec(mouse.x, mouse.y, total_rect.x, total_rect.y - 3*total_rect.height, total_rect.width, 6*total_rect.height)) {
+                        SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+                        timeline_selected = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+                        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+timeline_jump:
+                            played_perc    = ((f32)(mouse.x - total_rect.x))/(f32)total_rect.width;
+                            cur_music_time = AIL_LERP(played_perc, 0, cur_music_len);
+                            ClientMsg msg  = {
+                                .type = MSG_JUMP,
+                                .n    = cur_music_time,
+                            };
+                            // @Performance: Should the message be sent in a seperate thread instead?
+                            if (!send_msg(msg)) {
+                                // @TODO Display some kind of error
+                            }
+                            timeline_selected = false;
+                        }
+                    } else {
+                        x_circle = AIL_LERP(played_perc, play_bounds.x, play_bounds.x + play_bounds.width);;
+                        timeline_selected = false;
+                    }
+
                     RL_Rectangle played_rect = total_rect;
-                    played_rect.width = x_circle - play_bounds.x;
-                    played_rect.height += 2.0f;
+                    played_rect.width   = x_circle - play_bounds.x;
+                    played_rect.y      -= 2.0f;
+                    played_rect.height += 4.0f;
 
                     DrawRectangleRounded(total_rect,  5.0f, 5, RL_GRAY);
                     DrawRectangleRounded(played_rect, 5.0f, 5, RL_RED);
-                    DrawCircle(x_circle, play_bounds.y + total_rect.height/2, play_circ_radius, RL_RED);
+                    DrawCircle(x_circle, played_rect.y + played_rect.height/2, play_circ_radius, RL_RED);
 
                     cur_music_time += RL_GetFrameTime() * 1000.0f;
                 }
