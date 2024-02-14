@@ -89,6 +89,7 @@ int main(void)
     u8 search_text_buffer[1024] = {0};
     AIL_Allocator search_text_allocator = ail_alloc_buffer_new(1024, search_text_buffer);
 
+    u8   library_updated  = 0;
     bool is_music_playing = false;
     f64 cur_music_time = 0; // in ms
     f64 cur_music_len  = 0; // in ms
@@ -231,6 +232,9 @@ int main(void)
 
         bool requires_recalc = is_resized || view_changed || view_prev_changed;
 
+        // if (library_updated > 0) library_updated--;
+        library_updated -= (library_updated > 0);
+
 
         static f32 scroll = 0;
         if (view_changed) scroll = 0.0f;
@@ -300,7 +304,7 @@ int main(void)
                     if (search_res.updated && search_input_box.label.text.len) {
                         if (songs.data != library.data) ail_da_free(&songs);
                         songs = search_songs(search_input_box.label.text.data);
-                    } else if (!songs.data) songs = library;
+                    } else if (!songs.data || library_updated) songs = library;
 
 
                     static const u32 song_name_width  = 200;
@@ -399,7 +403,7 @@ int main(void)
 
             case UI_VIEW_ADD: {
                 static bool              btn_selected = false;
-                static RL_Rectangle         input_bounds = {0};
+                static RL_Rectangle      input_bounds = {0};
                 static AIL_Gui_Label     name_label   = {0};
                 static AIL_Gui_Input_Box name_input   = {0};
                 static AIL_Gui_Label     add_button   = {0};
@@ -445,6 +449,7 @@ int main(void)
                 if (file_parsed) {
                     song.name = song_name;
                     ail_da_push(&library, song);
+                    library_updated = 2; // setting it to 2 instead of true, because we reduce it by 1 each frame (up to 0) and thus it will still be greater 0 when being checked next frame
                     if (!save_pidi(song)) AIL_TODO();
                     if (!save_library()) AIL_TODO();
                     SET_VIEW(UI_VIEW_LIBRARY);
