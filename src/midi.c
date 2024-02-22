@@ -26,19 +26,19 @@ typedef struct {
 u32 read_var_len(AIL_Buffer *buffer);
 ParseMidiRes parse_midi(AIL_Buffer buffer);
 void write_midi(Song song, const char *fpath);
-void sort_chunks(AIL_DA(MusicChunk) chunks);
+void sort_chunks(AIL_DA(PidiCmd) cmds);
 
 
-void sort_chunks(AIL_DA(MusicChunk) chunks)
+void sort_chunks(AIL_DA(PidiCmd) cmds)
 {
-    for (u32 i = 0; i < chunks.len - 1; i++) {
+    for (u32 i = 0; i < cmds.len - 1; i++) {
         u32 min = i;
-        for (u32 j = i + 1; j < chunks.len; j++) {
-            if (chunks.data[j].time < chunks.data[min].time) min = j;
+        for (u32 j = i + 1; j < cmds.len; j++) {
+            if (cmds.data[j].time < cmds.data[min].time) min = j;
         }
-        MusicChunk tmp = chunks.data[i];
-        chunks.data[i] = chunks.data[min];
-        chunks.data[min] = tmp;
+        PidiCmd tmp = cmds.data[i];
+        cmds.data[i] = cmds.data[min];
+        cmds.data[min] = tmp;
     }
 }
 
@@ -58,7 +58,7 @@ u32 read_var_len(AIL_Buffer *buffer)
 ParseMidiRes parse_midi(AIL_Buffer buffer)
 {
     ParseMidiResVal val = {0};
-    val.song.chunks = ail_da_new_with_cap(MusicChunk, 256);
+    val.song.cmds = ail_da_new_with_cap(PidiCmd, 256);
     #define midiFileStartLen 8
     const char midiFileStart[midiFileStartLen] = {'M', 'T', 'h', 'd', 0, 0, 0, 6};
 
@@ -87,12 +87,12 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
     u8 command = 0; // used in running status (@Note: status == command)
     u8 channel = 0; // used in running status
     for (u16 i = 0; i < ntrcks; i++) {
-        // Parse track chunks
+        // Parse track cmds
         u64 ticks  = 0; // Amount of ticks of the virtual midi clock
         AIL_ASSERT(ail_buf_read4msb(&buffer) == 0x4D54726B);
         u32 chunk_len   = ail_buf_read4msb(&buffer);
         u32 chunk_end   = buffer.idx + chunk_len;
-        DBG_LOG("Parsing chunk from %#010llx to %#010x\n", buffer.idx, chunk_end);
+        DBG_LOG("Parsing cmd from %#010llx to %#010x\n", buffer.idx, chunk_end);
         while (buffer.idx < chunk_end) {
             // Parse MTrk events
             u32 delta_time = read_var_len(&buffer);
@@ -139,7 +139,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                         u8 se = ail_buf_read1(&buffer);
                         u8 fr = ail_buf_read1(&buffer);
                         u8 ff = ail_buf_read1(&buffer);
-                        // > This event, if present, designates the SMPTE time at which the track chunk is supposed to start
+                        // > This event, if present, designates the SMPTE time at which the track cmd is supposed to start
                         // @Study: Can we ignore this event?
                         DBG_LOG("SMPTE - hour: %u, min: %u, sec: %u, fr: %u, ff: %u\n", hr, mn, se, fr, ff);
                         AIL_TODO();
@@ -185,15 +185,15 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                     case 0x9: { // Note off / on
                         u8 key      = ail_buf_read1(&buffer);
                         u8 velocity = ail_buf_read1(&buffer);
-                        MusicChunk chunk = {
+                        PidiCmd cmd = {
                             .time     = ticks * (u64)(((f32)tempo / (f32)ticksPQN) / 1000.0f),
                             .velocity = velocity,
                             .key      = key % PIANO_KEY_AMOUNT,
                             .octave   = MIDI_0KEY_OCTAVE + (key / PIANO_KEY_AMOUNT),
                             .on       = command == 0x9 && velocity != 0,
                         };
-                        ail_da_push(&val.song.chunks, chunk);
-                        // DBG_LOG("Note: key=%d, velocity=%d, on=%d, ticks=%lld\n", key, velocity, chunk.on, ticks);
+                        ail_da_push(&val.song.cmds, cmd);
+                        // DBG_LOG("Note: key=%d, velocity=%d, on=%d, ticks=%lld\n", key, velocity, cmd.on, ticks);
                     } break;
                     case 0xA: { // Polyphonic Key Pressure
                         AIL_TODO();
@@ -252,12 +252,12 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
         }
     }
 
-    sort_chunks(val.song.chunks);
-    if (!val.song.chunks.len) val.song.len = 0;
+    sort_chunks(val.song.cmds);
+    if (!val.song.cmds.len) val.song.len = 0;
     else {
-        AIL_DA(MusicChunk) chunks = val.song.chunks;
-        AIL_ASSERT(!chunks.data[chunks.len - 1].on);
-        val.song.len = chunks.data[chunks.len - 1].time;
+        AIL_DA(PidiCmd) cmds = val.song.cmds;
+        AIL_ASSERT(!cmds.data[cmds.len - 1].on);
+        val.song.len = cmds.data[cmds.len - 1].time;
     }
 
     return (ParseMidiRes) { true, val };
@@ -319,8 +319,8 @@ void write_midi(Song song, const char *fpath)
 
     // Notes
     u64 last_tick = 0;
-    for (u32 i = 0; i < song.chunks.len; i++) {
-        MusicChunk c = song.chunks.data[i];
+    for (u32 i = 0; i < song.cmds.len; i++) {
+        PidiCmd c = song.cmds.data[i];
         u64 cur_tick = c.time / (u64)(((f32)tempo / (f32)ticksPQN) / 1000.0f);
         u32 delta_time = cur_tick - last_tick;
         // DBG_LOG("time: %lld, cur_tick: %lld, last_tick: %lld\n", c.time, cur_tick, last_tick);
