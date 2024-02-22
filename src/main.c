@@ -2,6 +2,10 @@
 // Includes //
 //////////////
 
+// @TODO: Send PIDI in stream cmds to the arduino
+// @TODO: When first finding the Arduino Port, the loudness and speed levels should be set, as they might still be stored in modified form from a pevious session
+// @TODO: Implement jumping on the timeline by sending new PIDI message with index 0
+
 #define AIL_ALLOC_IMPL
 #define AIL_ALL_IMPL
 #define AIL_MD_IMPL
@@ -9,9 +13,20 @@
 #define AIL_FS_IMPL
 #define AIL_BUF_IMPL
 #define AIL_SV_IMPL
+
+#include "../deps/raylib/src/raylib.h"  // For immediate UI framework
+static RL_MouseCursor cursor;
+#define SET_CURSOR(c) cursor = (c)
+#define AIL_GUI_SET_CURSOR SET_CURSOR
+
+#define ICON_SIZE_FACTOR 0.8f
+#define MAX_SPEED 9.75f
+#define MIN_SPEED 0.25f
+#define MAX_VOLUME 2.0f
+#define MIN_VOLUME 0.0f
+
 #include "ail_fs.h"
 #include "common.h"
-#include "../deps/raylib/src/raylib.h"  // For immediate UI framework
 #include <stdbool.h> // For boolean definitions
 #include <string.h>  // For memcpy
 #include <pthread.h> // For threads and mutexes
@@ -56,6 +71,8 @@ typedef enum {
     UI_VIEW_PARSING_SONG, // In the process of uploading a new song
 } UI_View;
 
+static inline bool draw_icon(RL_Texture icon, u8 texture_idx, f32 x, f32 y, f32 icon_size, bool *pressed);
+RL_Texture get_texture(const char *filepath);
 AIL_DA(Song) search_songs(const char *substr);
 void draw_loading_anim(u32 win_width, u32 win_height, bool start_new);
 bool is_songname_taken(const char *name);
@@ -81,7 +98,6 @@ bool library_ready = false;
 
 UI_View view = UI_VIEW_LIBRARY;
 
-
 int main(void)
 {
     // Initialize memory arena for UI
@@ -103,16 +119,27 @@ int main(void)
     char *file_path = NULL;
     pthread_t fileParsingThread;
     pthread_t loadLibraryThread;
-    pthread_t checkConnThread;
+    pthread_t commThread;
 
-    AIL_Allocator checkConnThreadAllocator = ail_alloc_arena_new(AIL_ALLOC_PAGE_SIZE, &ail_alloc_pager);
     pthread_create(&loadLibraryThread, NULL, load_library, NULL);
-    pthread_create(&checkConnThread,   NULL, check_connection_daemon, &checkConnThreadAllocator);
+    pthread_create(&commThread, NULL, comm_thread_main, NULL);
 
-    f32 size_smaller = 35;
-    f32 size_default = 50;
-    f32 size_max     = size_default;
-    RL_Font font = LoadFontEx("./assets/Roboto-Regular.ttf", size_max, NULL, 95);
+    // Load Icons
+#define ICON_TEXTURE_SIZE 512
+    RL_Texture play_icon   = get_texture("assets/play.png");
+    RL_Texture speed_icon  = get_texture("assets/speed.png");
+    RL_Texture volume_icon = get_texture("assets/volume.png");
+    bool paused = false;
+    bool muted  = false;
+    f32  speed  = 1.0f;
+    f32  volume = 1.0f;
+    set_volume(volume);
+    set_speed(speed);
+
+    static const f32 size_smaller = 35;
+    static const f32 size_default = 50;
+    static const f32 size_max     = size_default;
+    RL_Font font = LoadFontEx("assets/Roboto-Regular.ttf", size_max, NULL, 95);
     AIL_Gui_Style style_default = {
         .color        = RL_WHITE,
         .bg           = RL_BLANK,
@@ -132,8 +159,8 @@ int main(void)
     AIL_Gui_Style style_button_default = {
         .color        = RL_WHITE,
         .bg           = (RL_Color){42, 230, 37, 255},
-        .border_color = (RL_Color){ 9, 170,  6, 255},
-        .border_width = 5,
+        .border_color = RL_BLANK,
+        .border_width = 0,
         .font         = font,
         .font_size    = size_default,
         .cSpacing     = 2,
@@ -143,7 +170,8 @@ int main(void)
         .vAlign       = AIL_GUI_ALIGN_C,
     };
     AIL_Gui_Style style_button_hover = ail_gui_cloneStyle(style_button_default);
-    style_button_hover.border_color = RL_BLACK;
+    style_button_hover.border_color = (RL_Color){ 9, 170,  6, 255};
+    style_button_hover.border_width = 5;
     AIL_Gui_Style style_song_name_default = {
         .color        = RL_WHITE,
         .bg           = RL_LIGHTGRAY,
@@ -159,9 +187,9 @@ int main(void)
     };
     AIL_Gui_Style style_song_name_hover = ail_gui_cloneStyle(style_song_name_default);
     style_song_name_hover.bg = RL_GRAY;
-    AIL_Gui_Style     style_search = {
+    AIL_Gui_Style style_search = {
         .color        = RL_WHITE,
-        .bg           = BG_COLOR,
+        .bg           = RL_BLANK,
         .border_color = RL_GRAY,
         .font         = font,
         .border_width = 5,
@@ -172,20 +200,29 @@ int main(void)
         .hAlign       = AIL_GUI_ALIGN_LT,
         .vAlign       = AIL_GUI_ALIGN_C,
     };
+    AIL_Gui_Style style_warn_text = {
+        .color        = RL_YELLOW,
+        .bg           = RL_BLANK,
+        .border_color = RL_BLANK,
+        .font         = font,
+        .border_width = 0,
+        .font_size    = size_default,
+        .cSpacing     = 2,
+        .lSpacing     = 5,
+        .pad          = 0,
+        .hAlign       = AIL_GUI_ALIGN_C,
+        .vAlign       = AIL_GUI_ALIGN_C,
+    };
 
-    RL_Rectangle header_bounds, content_bounds, play_bounds;
+    RL_Rectangle header_bounds, content_bounds, play_bounds, icon_bounds;
+    u32 play_timeline_height, icon_size, header_y_pad, header_x_pad, play_bounds_pad, play_inner_pad;
+    f32 conn_circ_radius, play_circ_radius, volume_slider_width, volume_slider_height, volume_circ_radius, speed_max_size, icon_pad;
     AIL_Gui_Label centered_label = {
         .text         = ail_da_new_empty(char),
         .defaultStyle = style_default,
         .hovered      = style_default,
     };
-    char *library_label_msg = "Library:";
-    AIL_Gui_Label library_label = {
-        .text         = ail_da_from_parts(char, library_label_msg, strlen(library_label_msg), strlen(library_label_msg), &ail_default_allocator),
-        .defaultStyle = style_default_lt,
-        .hovered      = style_default_lt,
-    };
-    char *upload_btn_msg = "Add";
+    char *upload_btn_msg = "Upload";
     AIL_Gui_Label upload_button = {
         .text         = ail_da_from_parts(char, upload_btn_msg, strlen(upload_btn_msg), strlen(upload_btn_msg), &ail_default_allocator),
         .defaultStyle = style_button_default,
@@ -202,21 +239,58 @@ int main(void)
         bool is_resized = RL_IsWindowResized() || is_first_frame;
         is_first_frame = false;
         if (is_resized) {
-            win_width  = RL_GetScreenWidth();
-            win_height = RL_GetScreenHeight();
-            u32 header_pad = 5;
+            win_width    = RL_GetScreenWidth();
+            win_height   = RL_GetScreenHeight();
+            header_y_pad = AIL_CLAMP(win_height / 80, 0, 15);
+            header_x_pad = AIL_CLAMP(win_width/50, 0, 100);
             // Bounds of Header at top
+            // Header Layout (horizontal perspective):
+            // --------------------
+            // <Connection Status Circle>
+            // <Search Bar>
+            // <Upload Button>
+            // --------------------
             header_bounds  = (RL_Rectangle) {
-                .x = header_pad,
+                .x = header_x_pad,
                 .y = 0,
-                .width  = win_width - 2*header_pad,
-                .height = AIL_CLAMP(win_height / 10, size_max + 30, size_max*2)
+                .width  = win_width - 2*header_x_pad,
+                .height = AIL_CLAMP(win_height / 6, size_max + 30, size_max*2)
             };
-            // Bounds of Player-Timeline / General Footer
+
+            // Bounds of Footer
+            // Footer Layout (vertical perspective):
+            // --------------------
+            //  <play_bounds_pad>
+            //     <timeline>
+            //  <play_inner_pad>
+            // <Icons for Control>
+            //  <play_bounds_pad>
+            // --------------------
+            play_bounds_pad = header_x_pad;
+            play_inner_pad  = AIL_CLAMP(play_bounds_pad, 5, 15);
+            icon_size = size_max*3/2;
+            play_timeline_height = 10;
+            play_circ_radius     = AIL_CLAMP(play_bounds_pad, 1.3f*play_timeline_height, 2*play_timeline_height);
+            i32 play_bounds_min_height = AIL_MAX(2*size_default, play_inner_pad + play_timeline_height + icon_size + 2*play_bounds_pad);
             play_bounds.width  = header_bounds.width;
-            play_bounds.height = AIL_CLAMP(win_height / 10, size_max + 30, size_max*2);
-            play_bounds.x = header_bounds.x;
-            play_bounds.y = win_height - play_bounds.height;
+            play_bounds.height = play_bounds_min_height; //AIL_CLAMP(win_height/10, play_bounds_min_height, win_height/4);
+            play_bounds.x      = play_bounds_pad;
+            play_bounds.y      = win_height - play_bounds.height;
+
+            icon_bounds = (RL_Rectangle) {
+                .x = play_bounds.x,
+                .y = play_bounds.y + play_bounds_pad,
+                .width  = play_bounds.width,
+                .height = icon_size,
+            };
+            u8 icons_count = 4;
+            speed_max_size = 4*size_smaller; // Just an estimate based on expecting no more than 4 characters at most (e.g. 9.75x) in size_smaller font-size
+            icon_pad       = play_inner_pad;
+            f32 volume_slider_x  = speed_max_size + icon_pad + icons_count*(icon_size + icon_pad);
+            volume_slider_width  = AIL_MIN(AIL_MAX(4*size_default, (icon_bounds.width - volume_slider_x) / 3), icon_bounds.width - volume_slider_x);
+            volume_slider_height = AIL_MAX(5, play_timeline_height - 5);
+            volume_circ_radius   = AIL_CLAMP(icon_pad, 1.3f*volume_slider_height, 2.0f*volume_slider_height);
+
             // Bounds of Song Library
             content_bounds.x = header_bounds.x;
             content_bounds.y = header_bounds.y + header_bounds.height;
@@ -224,7 +298,7 @@ int main(void)
             content_bounds.height = win_height - content_bounds.y - play_bounds.height;
         }
         RL_ClearBackground(BG_COLOR);
-        SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+        SET_CURSOR(MOUSE_CURSOR_DEFAULT);
 
         if (view_prev_changed && view_changed) view_changed = false;
         else if (view_changed) { view_prev_changed = true; view_changed = false; }
@@ -245,31 +319,32 @@ int main(void)
         switch(view) {
             // @TODO: Display song timeline at the bottom (allowing user to jump back and forth on it)
             case UI_VIEW_LIBRARY: {
-                static bool loaded_lib_in_prev_frame = false;
+                // Recalculate cached sizes if necessary
                 if (requires_recalc) {
                     centered_label.bounds = (RL_Rectangle){0, 0, win_width, win_height};
-                    library_label.bounds  = header_bounds;
-                    u32     upload_margin   = 5;
-                    RL_Vector2 upload_txt_size = MeasureTextEx(upload_button.defaultStyle.font, upload_button.text.data, upload_button.defaultStyle.font_size, upload_button.defaultStyle.cSpacing);
-                    upload_button.bounds.y      = header_bounds.y + upload_margin + upload_button.defaultStyle.border_width;
-                    upload_button.bounds.height = header_bounds.height - upload_button.bounds.y - upload_button.defaultStyle.border_width - upload_margin;
-                    upload_button.bounds.width  = upload_button.defaultStyle.border_width*2 + upload_button.defaultStyle.pad*2 + upload_txt_size.x;
-                    upload_button.bounds.x      = header_bounds.x + header_bounds.width - upload_margin - upload_button.bounds.width;
+                    conn_circ_radius = header_bounds.height/2 - header_y_pad;
+                    RL_Vector2 upload_txt_size = MeasureTextEx(upload_button.hovered.font, upload_button.text.data, upload_button.hovered.font_size, upload_button.hovered.cSpacing);
+                    upload_button.bounds.y      = header_bounds.y + header_y_pad + upload_button.hovered.border_width;
+                    upload_button.bounds.height = header_bounds.height - upload_button.bounds.y - upload_button.hovered.border_width - header_y_pad;
+                    upload_button.bounds.width  = upload_button.hovered.border_width*2 + upload_button.hovered.pad*2 + upload_txt_size.x;
+                    upload_button.bounds.x      = header_bounds.x + header_bounds.width - header_y_pad - upload_button.bounds.width;
                 }
+
+
+                // Show loading animation if library is being loaded
+                static bool loaded_lib_in_prev_frame = false;
                 if (AIL_UNLIKELY(!library_ready)) {
                     loaded_lib_in_prev_frame = true;
                     char *loading_lib_text = "Loading Libary...";
                     centered_label.text    = ail_da_from_parts(char, loading_lib_text, strlen(loading_lib_text), strlen(loading_lib_text), &ail_default_allocator);
                     ail_gui_drawLabel(centered_label);
-                    SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+                    SET_CURSOR(MOUSE_CURSOR_DEFAULT);
                 }
+                // Show library otherwise
                 else {
-                    // DrawRectangle(header_bounds.x, header_bounds.y, header_bounds.width, header_bounds.height, RL_LIGHTRL_GRAY);
-                    AIL_Gui_Drawable_Text library_label_drawable;
-                    RL_Vector2 library_label_size = ail_gui_measureText(library_label.text.data, library_label.bounds, library_label.defaultStyle, &library_label_drawable);
-                    AIL_ASSERT(library_label_drawable.lineXs.data != NULL);
-                    ail_gui_drawPreparedSized(library_label_drawable, library_label.bounds, library_label.defaultStyle);
-                    ail_gui_free_drawable_text(&library_label_drawable);
+                    RL_Color conn_color = comm_is_connected ? RL_GREEN : RL_BLANK;
+                    DrawCircle(     header_bounds.x + conn_circ_radius, header_bounds.y + conn_circ_radius + header_y_pad, conn_circ_radius, conn_color);
+                    DrawCircleLines(header_bounds.x + conn_circ_radius, header_bounds.y + conn_circ_radius + header_y_pad, conn_circ_radius, RL_WHITE);
 
                     AIL_Gui_State upload_button_state = ail_gui_drawLabel(upload_button);
                     if (upload_button_state == AIL_GUI_STATE_PRESSED) SET_VIEW(UI_VIEW_DND);
@@ -281,13 +356,12 @@ int main(void)
                     static AIL_Gui_Update_Res search_res;
 
                     if (AIL_UNLIKELY(requires_recalc || loaded_lib_in_prev_frame)) {
-                        u32 search_margin = 15;
-                        u32 search_x      = library_label.bounds.x + library_label_size.x + library_label.defaultStyle.border_width + 2*library_label.defaultStyle.pad + style_search.border_width + search_margin;
+                        u32 search_x = header_bounds.x + 2*conn_circ_radius + header_x_pad;
                         search_bounds = (RL_Rectangle) {
-                            search_x,
-                            library_label.bounds.y + style_search.border_width,
-                            upload_button.bounds.x - upload_button.defaultStyle.border_width - search_margin - style_search.border_width - search_x,
-                            library_label.bounds.height - 2*style_search.border_width,
+                            .x = search_x,
+                            .y = header_bounds.y + style_search.border_width + header_y_pad,
+                            .width  = upload_button.bounds.x - upload_button.hovered.border_width - header_x_pad - style_search.border_width - search_x,
+                            .height = header_bounds.height - 2*style_search.border_width - 2*header_y_pad,
                         };
                         AIL_Gui_Label search_label = {
                             .bounds       = search_bounds,
@@ -307,6 +381,7 @@ int main(void)
                     } else if (!songs.data || library_updated) songs = library;
 
 
+                    // @Cleanup: Magic numbers hidden deep inside function
                     static const u32 song_name_width  = 200;
                     static const u32 song_name_height = 150;
                     static const u32 song_name_margin = 50;
@@ -323,7 +398,7 @@ int main(void)
 
                     for (u32 i = start_row * song_names_per_row; i < songs.len; i++) {
                         RL_Rectangle song_bounds = {
-                            start_x + (full_song_name_width + song_name_margin)*(i % song_names_per_row),
+                            start_x + (full_song_name_width + song_name_margin)*(i % song_names_per_row) + 2*style_song_name_default.border_width,
                             content_bounds.y + song_name_margin + (full_song_name_height + song_name_margin)*(i / song_names_per_row) - scroll,
                             song_name_width,
                             song_name_height
@@ -338,64 +413,131 @@ int main(void)
                         AIL_Gui_State song_label_state = ail_gui_drawLabelOuterBounds(song_label, content_bounds);
                         if (song_label_state == AIL_GUI_STATE_PRESSED) {
                             DBG_LOG("Playing song: %s\n", song_name);
-                            // @Performance: Sending message might take a while and should maybe be offloaded to a seperate thread
                             // @TODO: Display hover style of songs differently if not connected maybe?
-                            ClientMsg msg = {
-                                .type   = MSG_PIDI,
-                                .n      = songs.data[i].chunks.len,
-                                .chunks = songs.data[i].chunks.data,
-                            };
-                            if (send_msg(msg) || true) {
-                                is_music_playing = true;
-                                cur_music_len    = songs.data[i].len;
-                                cur_music_time   = 0;
-                            } else {
-                                // @TODO: Show some kind of error
-                                is_music_playing = false;
-                            }
+                            send_new_song(songs.data[i].cmds, 0.0f);
+                            is_music_playing = true;
+                            cur_music_len    = songs.data[i].len;
+                            cur_music_time   = 0;
                         }
                     }
                 }
+
+
+                // If music is playing -> show timeline & music controls
                 if (is_music_playing) {
                     static bool timeline_selected = false;
-                    u32 play_timline_size = 10.0f;
-                    f32 play_circ_radius  = 2*play_timline_size;
                     f32 played_perc = AIL_MIN(cur_music_time / cur_music_len, 1.0f);
                     RL_Rectangle total_rect = {
                         .x      = play_bounds.x,
-                        .y      = play_bounds.y + play_timline_size/2,
+                        .y      = play_bounds.y + play_bounds.height - play_timeline_height - play_bounds_pad,
                         .width  = play_bounds.width,
-                        .height = play_timline_size,
+                        .height = play_timeline_height,
                     };
 
                     RL_Vector2 mouse = GetMousePosition();
+                    bool timeline_hovered = ail_gui_isPointInRec(mouse.x, mouse.y, total_rect.x, total_rect.y - 2*total_rect.height, total_rect.width, 4*total_rect.height);
+
+                    // Draw Icons
+                    bool any_icon_hovered = false;
+                    #define FLOAT_TEXT_LEN 8
+                    static char speed_text[FLOAT_TEXT_LEN] = {0};
+                    { // snprintf(speed_text, FLOAT_TEXT_LEN, "%.2fx", speed) except no decimal digits are printed if they are 0
+                        u8 d1 = ((u8)(speed*10 ))%10;
+                        u8 d2 = ((u8)(speed*100))%10;
+                        if (!d1 && !d2) snprintf(speed_text, FLOAT_TEXT_LEN, "%.0fx", speed);
+                        else if (!d2)   snprintf(speed_text, FLOAT_TEXT_LEN, "%.1fx", speed);
+                        else            snprintf(speed_text, FLOAT_TEXT_LEN, "%.2fx", speed);
+                    }
+                    RL_Vector2 speed_text_size = MeasureTextEx(font, speed_text, size_smaller, 0);
+                    RL_Vector2 speed_text_pos  = {
+                        .x = icon_bounds.x + speed_max_size - speed_text_size.x,
+                        .y = icon_bounds.y + (icon_bounds.height - speed_text_size.y)/2,
+                    };
+                    RL_DrawTextEx(font, speed_text, speed_text_pos, size_smaller, 0, RL_WHITE);
+                    f32 icon_x = icon_bounds.x + speed_max_size + icon_pad;
+                    f32 icon_y = icon_bounds.y;
+                    bool pressed;
+                    any_icon_hovered |= draw_icon(speed_icon, 0, icon_x, icon_y, icon_size, &pressed);
+                    if (pressed) {
+                        speed = AIL_MAX(speed - 0.25f, MIN_SPEED);
+                        set_speed(speed);
+                    }
+                    icon_x += icon_size + icon_pad;
+                    any_icon_hovered |= draw_icon(play_icon, !paused, icon_x, icon_y, icon_size, &pressed);
+                    if (pressed) {
+                        paused = !paused;
+                        set_paused(paused);
+                    }
+                    icon_x += icon_size + icon_pad;
+                    any_icon_hovered |= draw_icon(speed_icon, 1, icon_x, icon_y, icon_size, &pressed);
+                    if (pressed) {
+                        speed = AIL_MIN(speed + 0.25f, MAX_SPEED);
+                        set_speed(speed);
+                    }
+                    icon_x += icon_size + icon_pad;
+                    static bool volume_hovered = false;
+                    bool volume_icon_hovered = draw_icon(volume_icon, (muted || volume < 0.1f) ? 0 : 1 + (volume >= 0.5f), icon_x, icon_y, icon_size, &pressed);
+                    icon_x += icon_size + icon_pad;
+                    if (pressed) {
+                        muted = !muted;
+                        if (muted) set_volume(0.0f);
+                        else set_volume(volume);
+                    }
+                    if (volume_hovered || volume_icon_hovered) {
+                        RL_Rectangle volume_slider = {
+                            .x = icon_x,
+                            .y = icon_y + (icon_size - volume_slider_height)/2,
+                            .width  = volume_slider_width,
+                            .height = volume_slider_height,
+                        };
+                        RL_Rectangle volume_slider_filled = volume_slider;
+                        volume_slider_filled.y      -= 2.0f;
+                        volume_slider_filled.height += 4.0f;
+
+                        // @TODO: Show volume in percentage on screen?
+                        volume_hovered = ail_gui_isPointInRec(mouse.x, mouse.y, icon_x - icon_pad, icon_y, volume_slider.width + 4*icon_pad, icon_size);
+                        if (ail_gui_isPointInRec(mouse.x, mouse.y, icon_x, volume_slider.y - 2*volume_slider.height, volume_slider.width, 4*volume_slider.height)) {
+                            SET_CURSOR(MOUSE_CURSOR_POINTING_HAND);
+                            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                                volume = AIL_LERP(AIL_CLAMP(AIL_REV_LERP(mouse.x, volume_slider.x, volume_slider.x + volume_slider.width), 0.0f, 1.0f), MIN_VOLUME, MAX_VOLUME);
+                                muted  = false;
+                                set_volume(volume);
+                            }
+                        }
+                        volume_hovered |= volume_icon_hovered;
+
+                        DrawRectangleRounded(volume_slider, 5.0f, 5, RL_GRAY);
+                        DrawRectangleRounded(volume_slider_filled, 5.0f, 5, RL_RED);
+                        DrawCircle(volume_slider.x + volume/MAX_VOLUME*volume_slider.width, volume_slider.y + volume_slider.height/2, volume_circ_radius, RL_RED);
+                    }
+                    any_icon_hovered |= volume_hovered;
+
+                    if (any_icon_hovered) {
+                        timeline_selected = false;
+                        timeline_hovered  = false;
+                    }
+
                     f32 x_circle;
                     if (timeline_selected) {
-                        SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+                        SET_CURSOR(MOUSE_CURSOR_POINTING_HAND);
                         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
                             x_circle = mouse.x;
                         } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
                             goto timeline_jump;
                         }
-                    } else if (ail_gui_isPointInRec(mouse.x, mouse.y, total_rect.x, total_rect.y - 3*total_rect.height, total_rect.width, 6*total_rect.height)) {
-                        SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+                    } else if (timeline_hovered) {
+                        SET_CURSOR(MOUSE_CURSOR_POINTING_HAND);
                         timeline_selected = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
-                        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
 timeline_jump:
                             played_perc    = ((f32)(mouse.x - total_rect.x))/(f32)total_rect.width;
                             cur_music_time = AIL_LERP(played_perc, 0, cur_music_len);
-                            ClientMsg msg  = {
-                                .type = MSG_JUMP,
-                                .n    = cur_music_time,
-                            };
-                            // @Performance: Should the message be sent in a seperate thread instead?
-                            if (!send_msg(msg)) {
-                                // @TODO Display some kind of error
-                            }
+                            send_new_song(comm_cmds, cur_music_time);
                             timeline_selected = false;
                         }
-                    } else {
-                        x_circle = AIL_LERP(played_perc, play_bounds.x, play_bounds.x + play_bounds.width);;
+                    }
+                    if (!timeline_selected) {
+                        x_circle = AIL_LERP(played_perc, play_bounds.x, play_bounds.x + play_bounds.width);
                         timeline_selected = false;
                     }
 
@@ -408,7 +550,12 @@ timeline_jump:
                     DrawRectangleRounded(played_rect, 5.0f, 5, RL_RED);
                     DrawCircle(x_circle, played_rect.y + played_rect.height/2, play_circ_radius, RL_RED);
 
-                    cur_music_time += RL_GetFrameTime() * 1000.0f;
+                    if (!paused) cur_music_time += speed * RL_GetFrameTime() * 1000.0f;
+                }
+                // Otherwise if Arduino is not connected, show text reminding user to connect
+                else if (!comm_is_connected) {
+                    static const char *not_connected_msg = "Please connect to the Arduino to play any music...";
+                    ail_gui_drawText(not_connected_msg, play_bounds, style_warn_text);
                 }
             } break;
 
@@ -455,8 +602,7 @@ timeline_jump:
                 name_input.selected           = !btn_selected;
                 AIL_Gui_Update_Res res = ail_gui_drawInputBox(&name_input);
 
-                static char *btn_text = "Add";
-                u32 btn_text_size     = MeasureTextEx(style_button_default.font, btn_text, style_button_default.font_size, style_button_default.cSpacing).x;
+                u32 btn_text_size     = MeasureTextEx(style_button_default.font, upload_btn_msg, style_button_default.font_size, style_button_default.cSpacing).x;
                 i32 btn_width         = btn_text_size + 2*style_button_default.border_width + 2*style_button_default.pad;
                 RL_Rectangle button_bounds = {
                     input_bounds.x + input_bounds.width - btn_width,
@@ -464,7 +610,7 @@ timeline_jump:
                     btn_width,
                     style_button_default.font_size + 2*style_button_default.pad
                 };
-                add_button = ail_gui_newLabel(button_bounds, btn_text, style_button_default, style_button_hover);
+                add_button = ail_gui_newLabel(button_bounds, upload_btn_msg, style_button_default, style_button_hover);
                 AIL_Gui_State btn_res = ail_gui_drawLabel(add_button);
 
                 if (res.tab || IsKeyPressed(KEY_TAB))   btn_selected = !btn_selected;
@@ -490,30 +636,14 @@ timeline_jump:
             } break;
         }
 
-        // Show connection status
-        {
-            char *text;
-            RL_Color color;
-            f32 pad = 15;
-            f32 spacing = 2;
-            if (IsArduinoConnected) {
-                text  = "Connected to Arduino";
-                color = SUCC_COLOR;
-            } else {
-                text  = "Not Connected to Arduino";
-                color = ERROR_COLOR;
-            }
-            f32 width = MeasureTextEx(font, text, size_smaller, spacing).x;
-            RL_Vector2 pos = { win_width - width - pad, win_height - size_smaller - pad };
-            RL_DrawTextEx(font, text, pos, size_smaller, spacing, color);
-        }
-
         RL_DrawFPS(10, 10); // @Cleanup
 
+        SetMouseCursor(cursor);
         RL_EndDrawing();
         ail_gui_allocator.free_all(ail_gui_allocator.data);
     }
 
+    if (comm_port) CloseHandle(comm_port);
     RL_CloseWindow();
     return 0;
 }
@@ -536,6 +666,46 @@ void draw_loading_anim(u32 win_width, u32 win_height, bool start_new)
         DrawCircle(x, y, loading_anim_circle_radius, col);
     }
     loading_anim_idx = (loading_anim_idx + 1) % loading_anim_len;
+}
+
+
+RL_Texture get_texture(const char *filepath)
+{
+    RL_Image img = RL_LoadImage(filepath);
+    AIL_ASSERT(img.data);
+    RL_Texture texture = LoadTextureFromImage(img);
+    GenTextureMipmaps(&texture);
+    SetTextureFilter(texture, TEXTURE_FILTER_BILINEAR);
+    AIL_ASSERT(texture.id);
+    return texture;
+}
+
+bool draw_icon(RL_Texture icon, u8 texture_idx, f32 x, f32 y, f32 icon_size, bool *pressed)
+{
+    RL_Vector2 mouse = GetMousePosition();
+    *pressed = false;
+    bool hovered = ail_gui_isPointInRec(mouse.x, mouse.y, x, y, icon_size, icon_size);
+    if (hovered) {
+        DrawCircle(x + icon_size/2, y + icon_size/2, icon_size/2, (RL_Color) { 0xff, 0xff, 0xff, 0x33 });
+        SET_CURSOR(MOUSE_CURSOR_POINTING_HAND);
+        *pressed = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    }
+    RL_Color col = ColorBrightness(RL_WHITE, hovered ? 1.0f : -0.1f);
+    DrawCircleLines(x + icon_size/2, y + icon_size/2, icon_size/2, col);
+    RL_Rectangle src = {
+        .x = ICON_TEXTURE_SIZE*texture_idx,
+        .y = 0,
+        .width  = ICON_TEXTURE_SIZE,
+        .height = ICON_TEXTURE_SIZE
+    };
+    RL_Rectangle dst = {
+        .x = x + (icon_size - ICON_SIZE_FACTOR*icon_size)/2,
+        .y = y + (icon_size - ICON_SIZE_FACTOR*icon_size)/2,
+        .width  = ICON_SIZE_FACTOR*icon_size,
+        .height = ICON_SIZE_FACTOR*icon_size,
+    };
+    DrawTexturePro(icon, src, dst, (RL_Vector2){ 0 }, 0, col);
+    return hovered;
 }
 
 // Returns a new array, that contains first array a and then array b. Useful for adding strings for example
@@ -606,9 +776,9 @@ bool save_pidi(Song song)
 {
     AIL_Buffer buf = ail_buf_new(1024);
     ail_buf_write4msb(&buf, PIDI_MAGIC);
-    ail_buf_write4lsb(&buf, song.chunks.len);
-    for (u32 i = 0; i < song.chunks.len; i++) {
-        encode_chunk(&buf, song.chunks.data[i]);
+    ail_buf_write4lsb(&buf, song.cmds.len);
+    for (u32 i = 0; i < song.cmds.len; i++) {
+        encode_cmd(&buf, song.cmds.data[i]);
     }
 
     u64 data_dir_path_len = data_dir_path.len;
@@ -660,7 +830,7 @@ void *load_library(void *arg)
             Song song = {
                 .name   = name,
                 .len    = song_len,
-                .chunks = ail_da_new_empty(MusicChunk),
+                .cmds = ail_da_new_empty(PidiCmd),
             };
             ail_da_push(&library, song);
         }
