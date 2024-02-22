@@ -2,7 +2,7 @@
 
 CC        = gcc
 MODE     ?= DEBUG
-CFLAGS   ?= -Wall -Wextra -Wpedantic -std=c99 -Wno-unused-function -D_DEBUG -DUI_DEBUG
+CFLAGS   ?= -Wall -Wextra -Wpedantic -std=c99 -Wno-unused-function -Wno-unused-local-typedefs -DDEBUG -D_DEBUG -DUI_DEBUG
 
 COMMON_PATH = ../common/
 
