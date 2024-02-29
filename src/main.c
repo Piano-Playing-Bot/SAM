@@ -316,12 +316,13 @@ int main(void)
         scroll += scroll_delta;
         if (AIL_UNLIKELY(scroll < 0.0f)) scroll = 0.0f;
 
+        if (requires_recalc) centered_label.bounds = (RL_Rectangle){0, 0, win_width, win_height};
+
         switch(view) {
             // @TODO: Display song timeline at the bottom (allowing user to jump back and forth on it)
             case UI_VIEW_LIBRARY: {
                 // Recalculate cached sizes if necessary
                 if (requires_recalc) {
-                    centered_label.bounds = (RL_Rectangle){0, 0, win_width, win_height};
                     conn_circ_radius = header_bounds.height/2 - header_y_pad;
                     RL_Vector2 upload_txt_size = MeasureTextEx(upload_button.hovered.font, upload_button.text.data, upload_button.hovered.font_size, upload_button.hovered.cSpacing);
                     upload_button.bounds.y      = header_bounds.y + header_y_pad + upload_button.hovered.border_width;
