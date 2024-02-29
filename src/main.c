@@ -567,14 +567,18 @@ timeline_jump:
                 if (view_changed || view_prev_changed) RL_UnloadDroppedFiles(RL_LoadDroppedFiles());
                 if (RL_IsFileDropped()) {
                     RL_FilePathList dropped_files = RL_LoadDroppedFiles();
+                    AIL_SV fpath = ail_sv_from_cstr(dropped_files.paths[0]);
                     if (dropped_files.count > 1 || !RL_IsPathFile(dropped_files.paths[0])) {
-                        centered_label.text.data = "You can only drag and drop one MIDI-File to play it on the Piano.\nPlease try again";
+                        // @TODO: Allow a list of midi files
+                        dnd_view_msg = "You can only drag and drop a single MIDI-File to play it on the Piano.\nPlease try again";
+                    } else if (!ail_sv_ends_with(fpath, ail_sv_from_cstr(".mid")) && !ail_sv_ends_with(fpath, ail_sv_from_cstr(".mid"))) {
+                        dnd_view_msg = "You can only drag and drop MIDI-Files to play it on the Piano.\nMake sure the file has the extension '.mid' or '.midi'.\nPlease try again.";
                     } else {
                         SET_VIEW(UI_VIEW_ADD);
                         u64 path_len = strlen(dropped_files.paths[0]);
                         file_path   = malloc(sizeof(char) * (path_len + 1));
                         memcpy(file_path, dropped_files.paths[0], path_len + 1);
-                        centered_label.text.data = file_path;
+                        dnd_view_msg = file_path;
                         pthread_create(&fileParsingThread, NULL, parse_file, (void *)file_path);
                     }
                     RL_UnloadDroppedFiles(dropped_files);
