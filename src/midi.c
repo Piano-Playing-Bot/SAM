@@ -31,7 +31,7 @@ void sort_chunks(AIL_DA(PidiCmd) cmds);
 
 void sort_chunks(AIL_DA(PidiCmd) cmds)
 {
-    for (u32 i = 0; i < cmds.len - 1; i++) {
+    for (i32 i = 0; i < (i32)cmds.len - 1; i++) {
         u32 min = i;
         for (u32 j = i + 1; j < cmds.len; j++) {
             if (cmds.data[j].time < cmds.data[min].time) min = j;
