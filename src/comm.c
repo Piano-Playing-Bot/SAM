@@ -1,11 +1,13 @@
 #define AIL_ALL_IMPL
 #define AIL_FS_IMPL
 #define AIL_BUF_IMPL
+#define AIL_RING_IMPL
 #define AIL_TIME_IMPL
 #define AIL_ALLOC_IMPL
 #include "ail.h"
 #include "ail_fs.h"
 #include "ail_buf.h"
+#include "ail_ring.h"
 #include "ail_time.h"
 #include "ail_alloc.h"
 #include "common.h"
@@ -15,7 +17,9 @@
 #include <windows.h>
 #include <xpsprint.h>
 
-#define CONN_CHECK_TIMEOUT 1.0f // in seconds
+// @TODO: Add Error Handling for trying to send a message again if no SUCC came back for it?
+// Maybe instead of responding with SUCC, the Arduino should just respond with the type of the message it successfully received?
+
 #define NEXT_MSGS_COUNT 4
 #define SEND_MSG_MAX_RETRIES 8
 
@@ -40,6 +44,7 @@ static AIL_DA(PidiCmd) comm_cmds   = { 0 };
 static NextMsgRing comm_next_msgs  = { 0 };
 static f64   last_comm_time        = 0.0f; // Timestamp of last received message from Arduino - Only read_msg_fast write this value
 static u8 comm_piano[KEYS_AMOUNT];
+static AIL_RingBuffer comm_rb      = {0};
 
 static pthread_mutex_t comm_volume_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t comm_speed_mutex  = PTHREAD_MUTEX_INITIALIZER;
@@ -52,13 +57,13 @@ void set_speed(f32 speed);
 
 // Internal only functions
 bool comm_setup_port(void);
-bool send_msg(ClientMsg msg, bool retry);
-ServerMsgType read_msg(bool retry);
-ServerMsgType read_msg_fast(bool retry);
+bool send_msg(ClientMsg msg);
 void find_server_port(AIL_Allocator *allocator);
 static inline void push_msg(ClientMsgType msg);
 static inline ClientMsgType pop_msg(void);
 static inline bool next_msgs_contain_pidi(void);
+static inline void listen_to_port(void);
+ServerMsgType check_for_msg(void);
 
 
 // Main loop for Communication Thread
@@ -69,24 +74,12 @@ void *comm_thread_main(void *args)
     AIL_ASSERT(arena.data != NULL); // @TODO: Show error message if something goes wrong
     while (true) {
         // If we are not connected, find port to connect
-        if (!comm_is_connected && ail_time_clock_elapsed(last_comm_time) >= CONN_CHECK_TIMEOUT) {
+        if (!comm_is_connected && ail_time_clock_elapsed(last_comm_time) >= MSG_TIMEOUT/1000.0f) {
+            // @TODO should find_server_port be its own function?
             find_server_port(&arena);
             comm_is_connected = comm_port != NULL;
         }
-        // Check incoming messages from server
-        if (comm_is_connected && read_msg(false) == SMSG_REQP) {
-            while (pthread_mutex_lock(&comm_song_mutex) != 0) {}
-            if (comm_cmds_idx < comm_cmds.len) {
 
-            } else {
-                ClientMsg msg = {
-                    .type = CMSG_PIDI,
-                    .data = { .pidi = { 0 } },
-                };
-                send_msg(msg, true);
-            }
-            while (pthread_mutex_unlock(&comm_song_mutex) != 0) {}
-        }
         // Send any queued up messages
         ClientMsgType next_msg;
         while (comm_is_connected && (next_msg = pop_msg())) {
@@ -135,11 +128,31 @@ void *comm_thread_main(void *args)
                     };
                     break;
             }
-            if (!send_msg(msg, true)) comm_is_connected = false;
-            else if (next_msg == CMSG_PIDI) comm_is_music_playing = true;
-            else if (next_msg == CMSG_CONT || next_msg == CMSG_STOP) comm_is_music_playing = !comm_is_music_playing;
+            comm_is_connected = send_msg(msg);
 skip_sending_message:
-            AIL_UNUSED(0);
+            AIL_UNUSED(0); // to allow `skip_sending_message` to exist here
+        }
+
+        // Read data from port into ring buffer
+        if (comm_is_connected) {
+            listen_to_port();
+            ServerMsgType res = check_for_msg();
+            // @TODO: Do smth with the response?
+            if (res == SMSG_REQP) {
+                while (pthread_mutex_lock(&comm_song_mutex) != 0) {}
+                if (comm_cmds_idx < comm_cmds.len) {
+                    // @TODO:
+                    AIL_TODO();
+                }
+                else {
+                    ClientMsg msg = {
+                        .type = CMSG_PIDI,
+                        .data = { .pidi = { 0 } },
+                    };
+                    send_msg(msg);
+                }
+                while (pthread_mutex_unlock(&comm_song_mutex) != 0) {}
+            }
         }
     }
     if (comm_port) CloseHandle(comm_port);
@@ -235,33 +248,53 @@ bool comm_setup_port(void) {
     return true;
 }
 
-ServerMsgType read_msg_fast(bool retry)
+// Read all incoming data from the port into the Ring Buffer
+void listen_to_port(void)
 {
-    u8 msg[MAX_SERVER_MSG_SIZE] = {0};
-    bool res;
-    u32 attempts = 0;
+    #define READING_CHUNK_SIZE 16
+AIL_STATIC_ASSERT(READING_CHUNK_SIZE < AIL_RING_SIZE/2);
+    u8 msg[READING_CHUNK_SIZE] = {0};
     DWORD read;
-    while (!(res = ReadFile(comm_port, msg, MAX_SERVER_MSG_SIZE, &read, 0)) && retry && attempts++ < SEND_MSG_MAX_RETRIES) {}
-    if (!res) return SMSG_NONE;
-
-    // printf("Read message (len=%lu): '%s'\n", read, msg);
-    if (read < 8) return SMSG_NONE;
-    u32 magic = (((u32)msg[0]) << 24) | (((u32)msg[1]) << 16) | (((u32)msg[2]) << 8) | (((u32)msg[3]) << 0);
-    u32 type  = (((u32)msg[4]) << 24) | (((u32)msg[5]) << 16) | (((u32)msg[6]) << 8) | (((u32)msg[7]) << 0);
-    if (magic != SPPP_MAGIC) return SMSG_NONE;
-    last_comm_time = ail_time_clock_start();
-    printf("Read message of type '%s'\n", (char *)msg);
-    return type;
+    comm_is_connected = ReadFile(comm_port, msg, READING_CHUNK_SIZE, &read, 0);
+    ail_ring_writen(&comm_rb, (u8)read, msg);
 }
 
-ServerMsgType read_msg(bool retry)
+// Checks the Ring Buffer for any SPPP messages
+ServerMsgType check_for_msg(void)
 {
-    if (!comm_setup_port()) return SMSG_NONE;
-    return read_msg_fast(retry);
+    // Go through Ring Buffer to check if any messages were received
+    // @TODO: Should Server always respond with the same message type instead of SUCC, so the client can now which message actually succeeded?
+    if (ail_ring_len(comm_rb) >= 12) {
+        // u32 tmp = ail_ring_peek4msb(comm_rb);
+        // char *s = (char *)&tmp;
+        // printf("Magic: %c%c%c%c\n", s[3], s[2], s[1], s[0]);
+        if (ail_ring_peek4msb(comm_rb) != SPPP_MAGIC) {
+            ail_ring_pop(&comm_rb);
+        } else {
+            ail_ring_popn(&comm_rb, 4);
+            ServerMsgType type = ail_ring_read4msb(&comm_rb);
+            u32 n = ail_ring_read4lsb(&comm_rb);
+            (void)n; // @TODO
+            return type;
+        }
+    }
+    return SMSG_NONE;
 }
 
-// @Note: Function is thread-safe and ensures that only ever one thread is using the Serial interface of the Arduino
-bool send_msg(ClientMsg msg, bool retry)
+// Blocks for at most MSG_TIMEOUT until a SPPP message was read from the Port or returns SMSG_NONE otherwise
+// Does not check whether comm_is_connected is true
+ServerMsgType wait_for_reply(void)
+{
+    f64 t = ail_time_clock_start();
+    while (ail_time_clock_elapsed(t) < (f64)MSG_TIMEOUT/1000.0f) {
+        listen_to_port();
+        ServerMsgType res = check_for_msg();
+        if (res != SMSG_NONE) return res;
+    }
+    return SMSG_NONE;
+}
+
+bool send_msg(ClientMsg msg)
 {
     u8 msgBuffer[MAX_CLIENT_MSG_SIZE] = {0};
     AIL_Buffer buffer = {
@@ -303,23 +336,15 @@ bool send_msg(ClientMsg msg, bool retry)
             break;
     }
 
-    if (!comm_setup_port()) return false;
+    // @Cleanup
     printf("Writing message '");
     for (u8 i = 0; i < 8; i++) printf("%c", buffer.data[i]);
     for (u8 i = 8; i < buffer.len; i++) printf(" %u", buffer.data[i]);
     printf("'\n");
-    u8 attempts = 0;
+
     bool res;
     DWORD written;
-    while (!(res = WriteFile(comm_port, buffer.data, buffer.len, &written, 0)) && retry && attempts++ < SEND_MSG_MAX_RETRIES) {}
-    if (!res) return false;
-
-    ServerMsgType reply = read_msg_fast(retry);
-    if (msg.type == CMSG_PING) {
-        return reply == SMSG_PONG;
-    } else {
-        return reply == SMSG_SUCC;
-    }
+    return WriteFile(comm_port, buffer.data, buffer.len, &written, 0);
 }
 
 // @Note: Updates comm_port
@@ -327,7 +352,7 @@ void find_server_port(AIL_Allocator *allocator)
 {
     ClientMsg ping = { .type = CMSG_PING };
     if (comm_port) {
-        if (send_msg(ping, false)) return;
+        if (send_msg(ping) && wait_for_reply() == SMSG_PONG) return;
         CloseHandle(comm_port);
         comm_port = NULL;
     }
@@ -351,7 +376,7 @@ void find_server_port(AIL_Allocator *allocator)
             comm_port = CreateFile(port.pPortName, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
             if (comm_port != INVALID_HANDLE_VALUE) {
                 // printf("Checking port '%s'...\n", port.pPortName);
-                if (send_msg(ping, false)) goto done;
+                if (send_msg(ping) && wait_for_reply() == SMSG_PONG) goto done;
                 CloseHandle(comm_port);
             }
         }
