@@ -1,5 +1,5 @@
 make main
-if ./build.sh; then
+if (make main); then
 	cd ./bin
 	if $1 -eq "r"; then
 		rm -rf ./data

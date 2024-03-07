@@ -39,12 +39,12 @@ raylib:
 	$(MAKE) -C deps/raylib/src
 
 clean:
-# ifeq ($(OS),Windows_NT)
-# 	rmdir bin /S /Q
-# 	mkdir bin
-# 	xcopy assets bin\assets\ /E /Q
-# else
+ifeq ($(OS),Windows_NT)
+	cmd /c if exist "bin" cmd /c rmdir bin /S /Q
+	mkdir bin
+	xcopy assets bin\\assets\\ /E /Q
+else
 	rm -rf ./bin
 	mkdir ./bin
 	cp -r "./assets" "./bin/assets"
-# endif
+endif
