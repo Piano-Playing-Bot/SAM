@@ -30,6 +30,8 @@ typedef struct NextMsgRing {
 } NextMsgRing;
 AIL_STATIC_ASSERT(NEXT_MSGS_COUNT <= UINT8_MAX);
 
+static const u8 comm_zero_piano[KEYS_AMOUNT] = {0};
+
 // @Note: All communication with the Arduino is done in a single thread external from the UI's main thread.
 // No other thread should write to these variables
 static void *comm_port             = 0; // Handle to the Port that is connected to the Arduino - Only find_server_port writes this value
@@ -37,7 +39,7 @@ static bool  comm_is_music_playing = false;
 static bool  comm_is_connected     = false;
 static f32   comm_volume           = 1.0f;
 static f32   comm_speed            = 1.0f;
-static f32   comm_time             = 1.0f;
+static f32   comm_time             = 0.0f;
 static u32   comm_pidi_chunk_idx   = 0;
 static u32   comm_cmds_idx         = 0;
 static AIL_DA(PidiCmd) comm_cmds   = { 0 };
@@ -75,7 +77,6 @@ void *comm_thread_main(void *args)
     while (true) {
         // If we are not connected, find port to connect
         if (!comm_is_connected && ail_time_clock_elapsed(last_comm_time) >= MSG_TIMEOUT/1000.0f) {
-            // @TODO should find_server_port be its own function?
             find_server_port(&arena);
             comm_is_connected = comm_port != NULL;
         }
@@ -83,6 +84,17 @@ void *comm_thread_main(void *args)
         // Send any queued up messages
         ClientMsgType next_msg;
         while (comm_is_connected && (next_msg = pop_msg())) {
+            char *next_msg_str;
+            switch (next_msg) {
+                case CMSG_NONE: next_msg_str = "NONE"; break;
+                case CMSG_PING: next_msg_str = "PING"; break;
+                case CMSG_PIDI: next_msg_str = "PIDI"; break;
+                case CMSG_STOP: next_msg_str = "STOP"; break;
+                case CMSG_CONT: next_msg_str = "CONT"; break;
+                case CMSG_LOUD: next_msg_str = "LOUD"; break;
+                case CMSG_SPED: next_msg_str = "SPED"; break;
+            }
+            printf("Sending message of type %s to Arduino\n", next_msg_str);
             ClientMsg msg;
             switch (next_msg) {
                 case CMSG_NONE:
@@ -112,13 +124,14 @@ void *comm_thread_main(void *args)
                     if (next_msgs_contain_pidi()) goto skip_sending_message;
                     memset(comm_piano, 0, KEYS_AMOUNT);
                     u8 active_keys_count = 0;
-                    for (u32 i = 0; i < comm_cmds.len && comm_cmds.data[i].time <= comm_time; i++) {
+                    u32 i;
+                    for (i = 0; i < comm_cmds.len && comm_cmds.data[i].time < comm_time; i++) {
                         apply_pidi_cmd(comm_piano, comm_cmds.data, i, comm_cmds.len, &active_keys_count);
                     }
                     ClientMsgPidiData pidi = {
                         .time       = comm_time,
-                        .cmds_count = comm_cmds.len,
-                        .cmds       = comm_cmds.data,
+                        .cmds_count = AIL_MIN(comm_cmds.len - i, CMDS_LIST_LEN),
+                        .cmds       = &comm_cmds.data[i],
                         .idx        = 0,
                         .piano      = comm_piano,
                     };
@@ -140,17 +153,27 @@ skip_sending_message:
             // @TODO: Do smth with the response?
             if (res == SMSG_REQP) {
                 while (pthread_mutex_lock(&comm_song_mutex) != 0) {}
+                ClientMsg msg = { .type = CMSG_PIDI };
                 if (comm_cmds_idx < comm_cmds.len) {
-                    // @TODO:
-                    AIL_TODO();
+                    msg.data.pidi = (ClientMsgPidiData){
+                        .idx  = ++comm_pidi_chunk_idx,
+                        .cmds = &comm_cmds.data[comm_cmds_idx],
+                        .cmds_count = AIL_MIN(comm_cmds.len - comm_cmds_idx, CMDS_LIST_LEN),
+                        .piano = &comm_zero_piano,
+                        .time  = 0,
+                    };
+                    comm_cmds_idx += msg.data.pidi.cmds_count;
                 }
                 else {
-                    ClientMsg msg = {
-                        .type = CMSG_PIDI,
-                        .data = { .pidi = { 0 } },
+                    msg.data.pidi = (ClientMsgPidiData){
+                        .idx = 0,
+                        .cmds = 0,
+                        .cmds_count = 0,
+                        .piano = &comm_zero_piano,
+                        .time = 0,
                     };
-                    send_msg(msg);
                 }
+                send_msg(msg);
                 while (pthread_mutex_unlock(&comm_song_mutex) != 0) {}
             }
         }
@@ -255,7 +278,8 @@ void listen_to_port(void)
 AIL_STATIC_ASSERT(READING_CHUNK_SIZE < AIL_RING_SIZE/2);
     u8 msg[READING_CHUNK_SIZE] = {0};
     DWORD read;
-    comm_is_connected = ReadFile(comm_port, msg, READING_CHUNK_SIZE, &read, 0);
+    bool res = ReadFile(comm_port, msg, READING_CHUNK_SIZE, &read, 0);
+    if (comm_is_connected) comm_is_connected = res;
     ail_ring_writen(&comm_rb, (u8)read, msg);
 }
 
@@ -275,6 +299,15 @@ ServerMsgType check_for_msg(void)
             ServerMsgType type = ail_ring_read4msb(&comm_rb);
             u32 n = ail_ring_read4lsb(&comm_rb);
             (void)n; // @TODO
+            char *type_str;
+            switch (type) {
+                case SMSG_NONE: type_str = "NONE"; break;
+                case SMSG_REQP: type_str = "REQP"; break;
+                case SMSG_PONG: type_str = "PONG"; break;
+                case SMSG_SUCC: type_str = "SUCC"; break;
+                default:        type_str = "Unknown"; break;
+            }
+            printf("Read message of type: %s\n", type_str);
             return type;
         }
     }
@@ -309,7 +342,7 @@ bool send_msg(ClientMsg msg)
         case CMSG_PIDI: {
             ClientMsgPidiData pidi = msg.data.pidi;
             if (pidi.idx == 0) {
-                ail_buf_write4lsb(&buffer, 4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_MUSIC_CHUNK_LEN);
+                ail_buf_write4lsb(&buffer, 4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_CMD_LEN);
                 ail_buf_write4lsb(&buffer, pidi.idx);
                 ail_buf_write8lsb(&buffer, pidi.time);
                 memcpy(&buffer.data[buffer.idx], pidi.piano, KEYS_AMOUNT);
@@ -319,7 +352,7 @@ bool send_msg(ClientMsg msg)
                     encode_cmd(&buffer, pidi.cmds[i]);
                 }
             } else {
-                ail_buf_write4lsb(&buffer, 4 + pidi.cmds_count * ENCODED_MUSIC_CHUNK_LEN);
+                ail_buf_write4lsb(&buffer, 4 + pidi.cmds_count * ENCODED_CMD_LEN);
                 ail_buf_write4lsb(&buffer, pidi.idx);
                 for (u32 i = 0; i < pidi.cmds_count; i++) {
                     encode_cmd(&buffer, pidi.cmds[i]);
@@ -338,11 +371,13 @@ bool send_msg(ClientMsg msg)
 
     // @Cleanup
     printf("Writing message '");
-    for (u8 i = 0; i < 8; i++) printf("%c", buffer.data[i]);
-    for (u8 i = 8; i < buffer.len; i++) printf(" %u", buffer.data[i]);
-    printf("'\n");
+    for (u8 i = 4; i < 8; i++) printf("%c", buffer.data[i]);
+    printf("' (%d bytes)...\n", buffer.len);
+    // printf("Writing message '");
+    // for (u8 i = 0; i < 8; i++) printf("%c", buffer.data[i]);
+    // for (u8 i = 8; i < buffer.len; i++) printf(" %u", buffer.data[i]);
+    // printf("'\n");
 
-    bool res;
     DWORD written;
     return WriteFile(comm_port, buffer.data, buffer.len, &written, 0);
 }
@@ -365,7 +400,7 @@ void find_server_port(AIL_Allocator *allocator)
     res = EnumPorts(NULL, 2, (u8 *)ports, required_size, &required_size, &ports_amount);
     if (res == 0) {
         AIL_DBG_PRINT("Error in enumerating ports: %ld\n", GetLastError());
-        return;
+        goto done;
     }
 
     for (unsigned long i = 0; i < ports_amount; i++) {
@@ -373,8 +408,8 @@ void find_server_port(AIL_Allocator *allocator)
         bool port_is_rw  = port.fPortType & PORT_TYPE_READ && port.fPortType & PORT_TYPE_WRITE;
         bool port_is_usb = strlen(port.pPortName) >= 3 && memcmp(port.pPortName, "COM", 3) == 0;
         if (port_is_rw && port_is_usb) {
-            comm_port = CreateFile(port.pPortName, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
-            if (comm_port != INVALID_HANDLE_VALUE) {
+            comm_port = CreateFile(port.pPortName, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL|FILE_SHARE_READ|FILE_SHARE_WRITE, 0);
+            if (comm_port != INVALID_HANDLE_VALUE && comm_setup_port()) {
                 // printf("Checking port '%s'...\n", port.pPortName);
                 if (send_msg(ping) && wait_for_reply() == SMSG_PONG) goto done;
                 CloseHandle(comm_port);

@@ -76,6 +76,7 @@ RL_Texture get_texture(const char *filepath);
 AIL_DA(Song) search_songs(const char *substr);
 void draw_loading_anim(u32 win_width, u32 win_height, bool start_new);
 bool is_songname_taken(const char *name);
+void  load_pidi(Song *song);
 bool  save_pidi(Song song);
 bool  save_library();
 void *load_library(void *arg);
@@ -414,10 +415,15 @@ int main(void)
                         AIL_Gui_State song_label_state = ail_gui_drawLabelOuterBounds(song_label, content_bounds);
                         if (song_label_state == AIL_GUI_STATE_PRESSED) {
                             DBG_LOG("Playing song: %s\n", song_name);
+                            // @TODO: Don't allow playing songs if not connected
                             // @TODO: Display hover style of songs differently if not connected maybe?
-                            send_new_song(songs.data[i].cmds, 0.0f);
+                            // @TODO: Reading file blocks UI thread...
+                            Song s = songs.data[i];
+                            load_pidi(&s);
+                            printf("\033[33mSending song with %d commands\033[0m\n", s.cmds.len);
+                            send_new_song(s.cmds, 0.0f);
                             is_music_playing = true;
-                            cur_music_len    = songs.data[i].len;
+                            cur_music_len    = s.len;
                             cur_music_time   = 0;
                         }
                     }
@@ -775,6 +781,27 @@ AIL_DA(Song) search_songs(const char *substr)
     ail_da_pushn(&prefixed, substringed.data, substringed.len);
     ail_da_free(&substringed);
     return prefixed;
+}
+
+// loads the PIDI-file (as referred to by song->name) into song
+void load_pidi(Song *song)
+{
+    u64 data_dir_path_len = data_dir_path.len;
+    u64 name_len          = strlen(song->name);
+    char *fname = malloc(data_dir_path_len + name_len + 6);
+    memcpy(fname, data_dir_path.str, data_dir_path_len);
+    memcpy(&fname[data_dir_path_len], song->name, name_len);
+    memcpy(&fname[data_dir_path_len + name_len], ".pidi", 6);
+    AIL_Buffer buf = ail_buf_from_file(fname);
+    free(fname);
+    AIL_ASSERT(ail_buf_read4msb(&buf) == PIDI_MAGIC);
+    u32 n = ail_buf_read4lsb(&buf);
+    song->cmds.data = song->cmds.allocator->alloc(song->cmds.allocator->data, n * sizeof(PidiCmd));
+    song->cmds.cap  = n;
+    song->cmds.len  = n;
+    for (u32 i = 0; i < n; i++) {
+        song->cmds.data[i] = decode_cmd(&buf);
+    }
 }
 
 bool save_pidi(Song song)
