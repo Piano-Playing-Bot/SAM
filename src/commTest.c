@@ -8,7 +8,7 @@
 #include "common.h"
 #include "comm.c"
 
-#define PORT_NAME "COM5"
+#define PORT_NAME "COM3"
 
 bool setup_port(void *handle) {
     COMMTIMEOUTS timeouts = {
@@ -29,7 +29,7 @@ bool setup_port(void *handle) {
         .fRtsControl  = RTS_CONTROL_DISABLE,
         .fOutX        = false,
         .fInX         = false,
-        .EofChar      = EOF, // @TODO: Should this be EOF or 0?
+        .EofChar      = EOF,
         .ByteSize     = 8,
     };
     if (!SetupComm(handle, 4096, 4096)) return false;
@@ -106,7 +106,7 @@ bool pidi_test(void)
 			.cmds_count = CMDS_COUNT,
 		}},
 	};
-	bool res = send_msg(msg, false);
+	bool res = send_msg(msg);
 	CloseHandle(comm_port);
 	return res;
 }
