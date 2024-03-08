@@ -23,7 +23,7 @@ CFLAGS   += $(INCLUDES) $(LIBS)
 
 all: main commTest midiTest
 
-main: src/main.c raylib
+main: bin/libraylib.a src/main.c src/midi.c src/comm.c
 	$(CC) -o bin/main src/main.c $(CFLAGS)
 
 commTest: src/commTest.c
@@ -35,7 +35,7 @@ midiTest: src/midiTest.c
 export PLATFORM=PLATFORM_DESKTOP
 export RAYLIB_LIBTYPE=STATIC
 export RAYLIB_RELEASE_PATH=../../../bin
-raylib:
+bin/libraylib.a:
 	$(MAKE) -C deps/raylib/src
 
 clean:
