@@ -281,6 +281,8 @@ AIL_STATIC_ASSERT(READING_CHUNK_SIZE < AIL_RING_SIZE/2);
     bool res = ReadFile(comm_port, msg, READING_CHUNK_SIZE, &read, 0);
     if (comm_is_connected) comm_is_connected = res;
     ail_ring_writen(&comm_rb, (u8)read, msg);
+    // for (u8 i = 0; i < read; i++) printf("Read: %2x\n", msg[i]);
+    for (u8 i = 0; i < read; i++) printf("%c", msg[i]);
 }
 
 // Checks the Ring Buffer for any SPPP messages
@@ -342,7 +344,10 @@ bool send_msg(ClientMsg msg)
         case CMSG_PIDI: {
             ClientMsgPidiData pidi = msg.data.pidi;
             if (pidi.idx == 0) {
-                ail_buf_write4lsb(&buffer, 4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_CMD_LEN);
+                printf("Encoded_Cmd_length: %d\n", ENCODED_CMD_LEN);
+                printf("size: %lld\n",  4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_CMD_LEN);
+                printf("max size: %lld\n", MAX_CLIENT_MSG_SIZE);
+                ail_buf_write8lsb(&buffer, 4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_CMD_LEN);
                 ail_buf_write4lsb(&buffer, pidi.idx);
                 ail_buf_write8lsb(&buffer, pidi.time);
                 memcpy(&buffer.data[buffer.idx], pidi.piano, KEYS_AMOUNT);
@@ -372,7 +377,8 @@ bool send_msg(ClientMsg msg)
     // @Cleanup
     printf("Writing message '");
     for (u8 i = 4; i < 8; i++) printf("%c", buffer.data[i]);
-    printf("' (%d bytes)...\n", buffer.len);
+    printf("' (%lld bytes)...\n", buffer.len);
+    if (msg.type == CMSG_PIDI) ail_fs_write_file("tmp.buf", msgBuffer, buffer.len);
     // printf("Writing message '");
     // for (u8 i = 0; i < 8; i++) printf("%c", buffer.data[i]);
     // for (u8 i = 8; i < buffer.len; i++) printf(" %u", buffer.data[i]);
