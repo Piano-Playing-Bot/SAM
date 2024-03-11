@@ -32,6 +32,9 @@ commTest: src/commTest.c
 midiTest: src/midiTest.c
 	$(CC) -o midiTest src/midiTest.c $(CFLAGS)
 
+test: src/test.c
+	$(CC) -o test src/test.c $(CFLAGS)
+
 export PLATFORM=PLATFORM_DESKTOP
 export RAYLIB_LIBTYPE=STATIC
 export RAYLIB_RELEASE_PATH=../../../bin
