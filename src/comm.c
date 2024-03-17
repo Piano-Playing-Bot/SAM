@@ -47,6 +47,7 @@ static NextMsgRing comm_next_msgs  = { 0 };
 static f64   last_comm_time        = 0.0f; // Timestamp of last received message from Arduino - Only read_msg_fast write this value
 static u8 comm_piano[KEYS_AMOUNT];
 static AIL_RingBuffer comm_rb      = {0};
+static ClientMsg comm_last_sent    = {0}; // Last message that was sent to the Arduino
 
 static pthread_mutex_t comm_volume_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t comm_speed_mutex  = PTHREAD_MUTEX_INITIALIZER;
@@ -68,6 +69,8 @@ static inline void listen_to_port(void);
 ServerMsgType check_for_msg(void);
 
 
+// @TODO: have a timer, that tells the UI the current time
+
 // Main loop for Communication Thread
 void *comm_thread_main(void *args)
 {
@@ -76,14 +79,24 @@ void *comm_thread_main(void *args)
     AIL_ASSERT(arena.data != NULL); // @TODO: Show error message if something goes wrong
     while (true) {
         // If we are not connected, find port to connect
-        if (!comm_is_connected && ail_time_clock_elapsed(last_comm_time) >= MSG_TIMEOUT/1000.0f) {
-            find_server_port(&arena);
-            comm_is_connected = comm_port != NULL;
+        if (ail_time_clock_elapsed(last_comm_time) >= MSG_TIMEOUT/1000.0f) {
+            if (!comm_is_connected) {
+                find_server_port(&arena);
+                comm_is_connected = comm_port != NULL;
+            } else if (comm_last_sent.type != CMSG_NONE) {
+                last_comm_time = ail_time_clock_start();
+                send_msg(comm_last_sent); // Send same message again, since something apparently went wrong
+                // @TODO: Potential problem here:
+                // UI sends PIDI chunk
+                // Arduino receives it, but SPPPSUCC message is lost on way
+                // UI sends same PIDI chunk again
+                // the same music is played twice
+            }
         }
 
         // Send any queued up messages
         ClientMsgType next_msg;
-        while (comm_is_connected && (next_msg = pop_msg())) {
+        while (comm_is_connected && comm_last_sent.type == CMSG_NONE && (next_msg = pop_msg())) {
             char *next_msg_str;
             switch (next_msg) {
                 case CMSG_NONE: next_msg_str = "NONE"; break;
@@ -150,31 +163,37 @@ skip_sending_message:
         if (comm_is_connected) {
             listen_to_port();
             ServerMsgType res = check_for_msg();
-            // @TODO: Do smth with the response?
-            if (res == SMSG_REQP) {
-                while (pthread_mutex_lock(&comm_song_mutex) != 0) {}
-                ClientMsg msg = { .type = CMSG_PIDI };
-                if (comm_cmds_idx < comm_cmds.len) {
-                    msg.data.pidi = (ClientMsgPidiData){
-                        .idx  = ++comm_pidi_chunk_idx,
-                        .cmds = &comm_cmds.data[comm_cmds_idx],
-                        .cmds_count = AIL_MIN(comm_cmds.len - comm_cmds_idx, CMDS_LIST_LEN),
-                        .piano = &comm_zero_piano,
-                        .time  = 0,
-                    };
-                    comm_cmds_idx += msg.data.pidi.cmds_count;
-                }
-                else {
-                    msg.data.pidi = (ClientMsgPidiData){
-                        .idx = 0,
-                        .cmds = 0,
-                        .cmds_count = 0,
-                        .piano = &comm_zero_piano,
-                        .time = 0,
-                    };
-                }
-                send_msg(msg);
-                while (pthread_mutex_unlock(&comm_song_mutex) != 0) {}
+            switch (res) {
+                case SMSG_PONG:
+                case SMSG_SUCC:
+                    comm_last_sent = {0}; // indicates, that last message was received successfully by arduino
+                    break;
+                case SMSG_REQP: {
+                    while (pthread_mutex_lock(&comm_song_mutex) != 0) {}
+                    ClientMsg msg = { .type = CMSG_PIDI };
+                    if (comm_cmds_idx < comm_cmds.len) {
+                        msg.data.pidi = (ClientMsgPidiData){
+                            .idx  = ++comm_pidi_chunk_idx,
+                            .cmds = &comm_cmds.data[comm_cmds_idx],
+                            .cmds_count = AIL_MIN(comm_cmds.len - comm_cmds_idx, CMDS_LIST_LEN),
+                            .piano = &comm_zero_piano,
+                            .time  = 0,
+                        };
+                        comm_cmds_idx += msg.data.pidi.cmds_count;
+                    }
+                    else {
+                        msg.data.pidi = (ClientMsgPidiData) {
+                            .idx = 0,
+                            .cmds = 0,
+                            .cmds_count = 0,
+                            .piano = &comm_zero_piano,
+                            .time = 0,
+                        };
+                    }
+                    send_msg(msg);
+                    while (pthread_mutex_unlock(&comm_song_mutex) != 0) {}
+                } break;
+                case SMSG_NONE: {}
             }
         }
     }
