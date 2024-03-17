@@ -340,10 +340,9 @@ bool send_msg(ClientMsg msg)
         case CMSG_PIDI: {
             ClientMsgPidiData pidi = msg.data.pidi;
             if (pidi.idx == 0) {
-                printf("Encoded_Cmd_length: %d\n", ENCODED_CMD_LEN);
-                printf("size: %lld\n",  4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_CMD_LEN);
+                printf("size: %d\n",  4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_CMD_LEN);
                 printf("max size: %lld\n", MAX_CLIENT_MSG_SIZE);
-                ail_buf_write8lsb(&buffer, 4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_CMD_LEN);
+                ail_buf_write4lsb(&buffer, 4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_CMD_LEN);
                 ail_buf_write4lsb(&buffer, pidi.idx);
                 ail_buf_write8lsb(&buffer, pidi.time);
                 memcpy(&buffer.data[buffer.idx], pidi.piano, KEYS_AMOUNT);
