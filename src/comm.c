@@ -166,7 +166,7 @@ skip_sending_message:
             switch (res) {
                 case SMSG_PONG:
                 case SMSG_SUCC:
-                    comm_last_sent = {0}; // indicates, that last message was received successfully by arduino
+                    comm_last_sent = (ClientMsg){0}; // indicates, that last message was received successfully by arduino
                     break;
                 case SMSG_REQP: {
                     while (pthread_mutex_lock(&comm_song_mutex) != 0) {}
