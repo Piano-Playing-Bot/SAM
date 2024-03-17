@@ -173,11 +173,11 @@ skip_sending_message:
                     ClientMsg msg = { .type = CMSG_PIDI };
                     if (comm_cmds_idx < comm_cmds.len) {
                         comm_cmds_idx += CMDS_LIST_LEN;
-                        msg.data.pidi = (ClientMsgPidiData){
+                        msg.data.pidi = (ClientMsgPidiData) {
                             .idx  = ++comm_pidi_chunk_idx,
                             .cmds = &comm_cmds.data[comm_cmds_idx],
                             .cmds_count = AIL_MIN(comm_cmds.len - comm_cmds_idx, CMDS_LIST_LEN),
-                            .piano = &comm_zero_piano,
+                            .piano = (u8*)&comm_zero_piano,
                             .time  = 0,
                         };
                     }
@@ -186,7 +186,7 @@ skip_sending_message:
                             .idx = 0,
                             .cmds = 0,
                             .cmds_count = 0,
-                            .piano = &comm_zero_piano,
+                            .piano = (u8*)&comm_zero_piano,
                             .time = 0,
                         };
                     }
@@ -396,7 +396,7 @@ bool send_msg(ClientMsg msg)
     if (msg.type == CMSG_PIDI) {
         char buf[16];
         sprintf(buf, "msg-%d.buf", i++);
-        ail_fs_write_file(buf, msgBuffer, buffer.len);
+        ail_fs_write_file(buf, (char*)msgBuffer, buffer.len);
     }
     // printf("Writing message '");
     // for (u8 i = 0; i < 8; i++) printf("%c", buffer.data[i]);

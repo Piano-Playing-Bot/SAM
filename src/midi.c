@@ -86,6 +86,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
 
     u8 command = 0; // used in running status (@Note: status == command)
     u8 channel = 0; // used in running status
+    AIL_UNUSED(channel);
     for (u16 i = 0; i < ntrcks; i++) {
         // Parse track cmds
         u64 ticks  = 0; // Amount of ticks of the virtual midi clock
@@ -327,6 +328,7 @@ void write_midi(Song song, const char *fpath)
 
         // Write variable length field for delta_time
         const u32 dt = delta_time;
+        AIL_UNUSED(dt);
         u32 x = delta_time & 0x7f;
         while ((delta_time >>= 7) > 0) {
             x <<= 8;

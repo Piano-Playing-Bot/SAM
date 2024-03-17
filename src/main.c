@@ -157,6 +157,7 @@ int main(void)
     AIL_Gui_Style style_default_lt = ail_gui_cloneStyle(style_default);
     style_default_lt.hAlign = AIL_GUI_ALIGN_LT;
     style_default_lt.vAlign = AIL_GUI_ALIGN_LT;
+    AIL_UNUSED(style_default_lt);
     AIL_Gui_Style style_button_default = {
         .color        = RL_WHITE,
         .bg           = (RL_Color){42, 230, 37, 255},
@@ -216,7 +217,7 @@ int main(void)
     };
 
     RL_Rectangle header_bounds, content_bounds, play_bounds, icon_bounds;
-    u32 play_timeline_height, icon_size, header_y_pad, header_x_pad, play_bounds_pad, play_inner_pad;
+    u32 play_timeline_height, play_timeline_width, icon_size, header_y_pad, header_x_pad, play_bounds_pad, play_inner_pad;
     f32 conn_circ_radius, play_circ_radius, volume_slider_width, volume_slider_height, volume_circ_radius, speed_max_size, icon_pad;
     AIL_Gui_Label centered_label = {
         .text         = ail_da_new_empty(char),
