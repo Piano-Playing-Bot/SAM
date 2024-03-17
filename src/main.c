@@ -414,9 +414,8 @@ int main(void)
                             .hovered      = style_song_name_hover,
                         };
                         AIL_Gui_State song_label_state = ail_gui_drawLabelOuterBounds(song_label, content_bounds);
-                        if (song_label_state == AIL_GUI_STATE_PRESSED) {
+                        if (song_label_state == AIL_GUI_STATE_PRESSED && comm_is_connected) {
                             DBG_LOG("Playing song: %s\n", song_name);
-                            // @TODO: Don't allow playing songs if not connected
                             // @TODO: Display hover style of songs differently if not connected maybe?
                             // @TODO: Reading file blocks UI thread...
                             Song s = songs.data[i];
