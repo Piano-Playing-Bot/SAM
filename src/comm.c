@@ -124,8 +124,8 @@ void *comm_thread_main(void *args)
                     if (next_msgs_contain_pidi()) goto skip_sending_message;
                     memset(comm_piano, 0, KEYS_AMOUNT);
                     u8 active_keys_count = 0;
-                    u32 i;
-                    for (i = 0; i < comm_cmds.len && comm_cmds.data[i].time < comm_time; i++) {
+                    u32 i = 0;
+                    for (; i < comm_cmds.len && comm_cmds.data[i].time < comm_time; i++) {
                         apply_pidi_cmd(comm_piano, comm_cmds.data, i, comm_cmds.len, &active_keys_count);
                     }
                     ClientMsgPidiData pidi = {
@@ -155,6 +155,7 @@ skip_sending_message:
                 while (pthread_mutex_lock(&comm_song_mutex) != 0) {}
                 ClientMsg msg = { .type = CMSG_PIDI };
                 if (comm_cmds_idx < comm_cmds.len) {
+                    comm_cmds_idx += CMDS_LIST_LEN;
                     msg.data.pidi = (ClientMsgPidiData){
                         .idx  = ++comm_pidi_chunk_idx,
                         .cmds = &comm_cmds.data[comm_cmds_idx],
@@ -162,7 +163,6 @@ skip_sending_message:
                         .piano = &comm_zero_piano,
                         .time  = 0,
                     };
-                    comm_cmds_idx += msg.data.pidi.cmds_count;
                 }
                 else {
                     msg.data.pidi = (ClientMsgPidiData){
@@ -289,29 +289,25 @@ AIL_STATIC_ASSERT(READING_CHUNK_SIZE < AIL_RING_SIZE/2);
 ServerMsgType check_for_msg(void)
 {
     // Go through Ring Buffer to check if any messages were received
-    // @TODO: Should Server always respond with the same message type instead of SUCC, so the client can now which message actually succeeded?
+    // @TODO: Should Server always respond with the same message type instead of SUCC, so the client can know which message actually succeeded?
+    while (ail_ring_len(comm_rb) >= 12 && ail_ring_peek4msb(comm_rb) != SPPP_MAGIC) {
+        ail_ring_pop(&comm_rb);
+    }
     if (ail_ring_len(comm_rb) >= 12) {
-        // u32 tmp = ail_ring_peek4msb(comm_rb);
-        // char *s = (char *)&tmp;
-        // printf("Magic: %c%c%c%c\n", s[3], s[2], s[1], s[0]);
-        if (ail_ring_peek4msb(comm_rb) != SPPP_MAGIC) {
-            ail_ring_pop(&comm_rb);
-        } else {
-            ail_ring_popn(&comm_rb, 4);
-            ServerMsgType type = ail_ring_read4msb(&comm_rb);
-            u32 n = ail_ring_read4lsb(&comm_rb);
-            (void)n; // @TODO
-            char *type_str;
-            switch (type) {
-                case SMSG_NONE: type_str = "NONE"; break;
-                case SMSG_REQP: type_str = "REQP"; break;
-                case SMSG_PONG: type_str = "PONG"; break;
-                case SMSG_SUCC: type_str = "SUCC"; break;
-                default:        type_str = "Unknown"; break;
-            }
-            printf("Read message of type: %s\n", type_str);
-            return type;
+        ail_ring_popn(&comm_rb, 4);
+        ServerMsgType type = ail_ring_read4msb(&comm_rb);
+        u32 n = ail_ring_read4lsb(&comm_rb);
+        (void)n; // @TODO
+        char *type_str;
+        switch (type) {
+            case SMSG_NONE: type_str = "NONE"; break;
+            case SMSG_REQP: type_str = "REQP"; break;
+            case SMSG_PONG: type_str = "PONG"; break;
+            case SMSG_SUCC: type_str = "SUCC"; break;
+            default:        type_str = "Unknown"; break;
         }
+        printf("Read message of type: %s\n", type_str);
+        return type;
     }
     return SMSG_NONE;
 }
