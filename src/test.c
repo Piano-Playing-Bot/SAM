@@ -31,7 +31,7 @@ int main(void)
 							.time = time,
 						};
 						encode_cmd(&buffer, cmd);
-						PidiCmd new_cmd = decode_cmd(&buffer);
+						PidiCmd new_cmd = decode_cmd_simple(buffer.data);
 						if (cmd_eq(cmd, new_cmd)) {
 							printf("Original Command: ");
 							print_cmd(cmd);
