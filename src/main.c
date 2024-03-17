@@ -261,16 +261,18 @@ int main(void)
             // Bounds of Footer
             // Footer Layout (vertical perspective):
             // --------------------
-            //  <play_bounds_pad>
-            //     <timeline>
-            //  <play_inner_pad>
-            // <Icons for Control>
-            //  <play_bounds_pad>
+            //       <play_bounds_pad>
+            //  <Speed Icons> <Volume Icons>
+            //       <play_inner_pad>
+            //   <pause/continue> <timeline>
+            //       <play_bounds_pad>
             // --------------------
             play_bounds_pad = header_x_pad;
             play_inner_pad  = AIL_CLAMP(play_bounds_pad, 5, 15);
             icon_size = size_max*3/2;
+            icon_pad  = play_inner_pad;
             play_timeline_height = 10;
+            play_timeline_width  = play_bounds.width - icon_size - icon_pad;
             play_circ_radius     = AIL_CLAMP(play_bounds_pad, 1.3f*play_timeline_height, 2*play_timeline_height);
             i32 play_bounds_min_height = AIL_MAX(2*size_default, play_inner_pad + play_timeline_height + icon_size + 2*play_bounds_pad);
             play_bounds.width  = header_bounds.width;
@@ -286,7 +288,6 @@ int main(void)
             };
             u8 icons_count = 4;
             speed_max_size = 4*size_smaller; // Just an estimate based on expecting no more than 4 characters at most (e.g. 9.75x) in size_smaller font-size
-            icon_pad       = play_inner_pad;
             f32 volume_slider_x  = speed_max_size + icon_pad + icons_count*(icon_size + icon_pad);
             volume_slider_width  = AIL_MIN(AIL_MAX(4*size_default, (icon_bounds.width - volume_slider_x) / 3), icon_bounds.width - volume_slider_x);
             volume_slider_height = AIL_MAX(5, play_timeline_height - 5);
