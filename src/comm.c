@@ -373,7 +373,12 @@ bool send_msg(ClientMsg msg)
     printf("Writing message '");
     for (u8 i = 4; i < 8; i++) printf("%c", buffer.data[i]);
     printf("' (%lld bytes)...\n", buffer.len);
-    if (msg.type == CMSG_PIDI) ail_fs_write_file("tmp.buf", msgBuffer, buffer.len);
+    static int i = 0;
+    if (msg.type == CMSG_PIDI) {
+        char buf[16];
+        sprintf(buf, "msg-%d.buf", i++);
+        ail_fs_write_file(buf, msgBuffer, buffer.len);
+    }
     // printf("Writing message '");
     // for (u8 i = 0; i < 8; i++) printf("%c", buffer.data[i]);
     // for (u8 i = 8; i < buffer.len; i++) printf(" %u", buffer.data[i]);
