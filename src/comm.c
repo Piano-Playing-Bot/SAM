@@ -84,7 +84,7 @@ void *comm_thread_main(void *args)
                 find_server_port(&arena);
                 comm_is_connected = comm_port != NULL;
             } else if (comm_last_sent.type != CMSG_NONE) {
-                last_comm_time = ail_time_clock_start();
+                printf("Sending msg again\n");
                 send_msg(comm_last_sent); // Send same message again, since something apparently went wrong
                 // @TODO: Potential problem here:
                 // UI sends PIDI chunk
@@ -107,7 +107,7 @@ void *comm_thread_main(void *args)
                 case CMSG_LOUD: next_msg_str = "LOUD"; break;
                 case CMSG_SPED: next_msg_str = "SPED"; break;
             }
-            printf("Sending message of type %s to Arduino\n", next_msg_str);
+            // printf("Sending message of type %s to Arduino\n", next_msg_str);
             ClientMsg msg;
             switch (next_msg) {
                 case CMSG_NONE:
@@ -230,7 +230,7 @@ bool next_msgs_contain_pidi(void)
 void send_new_song(AIL_DA(PidiCmd) cmds, f32 start_time)
 {
     while (pthread_mutex_lock(&comm_song_mutex) != 0) {}
-    printf("\033[33mSENDING NEW SONG at time %f\033[0m\n", start_time);
+    // printf("\033[33mSENDING NEW SONG at time %f\033[0m\n", start_time);
     if (comm_cmds.data) ail_da_free(&comm_cmds);
     comm_pidi_chunk_idx = 0;
     comm_time = start_time;
@@ -284,6 +284,11 @@ bool comm_setup_port(void) {
         .fInX         = false,
         .EofChar      = EOF,
         .ByteSize     = 8,
+        .fDtrControl     = DTR_CONTROL_DISABLE,
+        .fRtsControl     = RTS_CONTROL_DISABLE,
+        .fOutxCtsFlow    = 0,
+        .fOutxDsrFlow    = 0,
+        .fDsrSensitivity = 0,
     };
     if (!SetupComm(comm_port, 4096, 4096)) return false;
     if (!SetCommState(comm_port, &dcb)) return false;
@@ -325,7 +330,7 @@ ServerMsgType check_for_msg(void)
             case SMSG_SUCC: type_str = "SUCC"; break;
             default:        type_str = "Unknown"; break;
         }
-        printf("Read message of type: %s\n", type_str);
+        // printf("Read message of type: %s\n", type_str);
         return type;
     }
     return SMSG_NONE;
@@ -346,6 +351,7 @@ ServerMsgType wait_for_reply(void)
 
 bool send_msg(ClientMsg msg)
 {
+#define MAX_BYTES_TO_SEND_AT_ONCE 32
     u8 msgBuffer[MAX_CLIENT_MSG_SIZE] = {0};
     AIL_Buffer buffer = {
         .data = msgBuffer,
@@ -359,8 +365,8 @@ bool send_msg(ClientMsg msg)
         case CMSG_PIDI: {
             ClientMsgPidiData pidi = msg.data.pidi;
             if (pidi.idx == 0) {
-                printf("size: %d\n",  4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_CMD_LEN);
-                printf("max size: %lld\n", MAX_CLIENT_MSG_SIZE);
+                // printf("size: %d\n",  4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_CMD_LEN);
+                // printf("max size: %lld\n", MAX_CLIENT_MSG_SIZE);
                 ail_buf_write4lsb(&buffer, 4 + 8 + KEYS_AMOUNT + pidi.cmds_count * ENCODED_CMD_LEN);
                 ail_buf_write4lsb(&buffer, pidi.idx);
                 ail_buf_write8lsb(&buffer, pidi.time);
@@ -389,9 +395,9 @@ bool send_msg(ClientMsg msg)
     }
 
     // @Cleanup
-    printf("Writing message '");
-    for (u8 i = 4; i < 8; i++) printf("%c", buffer.data[i]);
-    printf("' (%lld bytes)...\n", buffer.len);
+    // printf("Writing message '");
+    // for (u8 i = 4; i < 8; i++) printf("%c", buffer.data[i]);
+    // printf("' (%lld bytes)...\n", buffer.len);
     static int i = 0;
     if (msg.type == CMSG_PIDI) {
         char buf[16];
@@ -404,7 +410,19 @@ bool send_msg(ClientMsg msg)
     // printf("'\n");
 
     DWORD written;
-    return WriteFile(comm_port, buffer.data, buffer.len, &written, 0);
+    u64 buffer_idx = 0;
+    u64 toWrite    = 0;
+    do {
+        toWrite = AIL_MIN(buffer.len - buffer_idx, MAX_BYTES_TO_SEND_AT_ONCE);
+        bool res = WriteFile(comm_port, &buffer.data[buffer_idx], toWrite, &written, 0);
+        AIL_ASSERT(res);
+        AIL_ASSERT(written == toWrite);
+        buffer_idx += toWrite;
+        if (buffer_idx < buffer.len) ail_time_sleep(5);
+    } while (toWrite);
+    comm_last_sent = msg;
+    last_comm_time = ail_time_clock_start();
+    return true;
 }
 
 // @Note: Updates comm_port
