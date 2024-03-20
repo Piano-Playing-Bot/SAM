@@ -39,7 +39,7 @@ static bool  comm_is_music_playing = false;
 static bool  comm_is_connected     = false;
 static f32   comm_volume           = 1.0f;
 static f32   comm_speed            = 1.0f;
-static f32   comm_time             = 0.0f;
+static u32   comm_time             = 0;
 static u32   comm_pidi_chunk_idx   = 0;
 static u32   comm_cmds_idx         = 0;
 static AIL_DA(PidiCmd) comm_cmds   = { 0 };
@@ -54,7 +54,7 @@ static pthread_mutex_t comm_speed_mutex  = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t comm_song_mutex   = PTHREAD_MUTEX_INITIALIZER;
 
 // For writing to the communication thread, the main thread should call the following functions
-void send_new_song(AIL_DA(PidiCmd) cmds, f32 start_time);
+void send_new_song(AIL_DA(PidiCmd) cmds, u32 start_time);
 void set_volume(f32 volume);
 void set_speed(f32 speed);
 
@@ -97,6 +97,7 @@ void *comm_thread_main(void *args)
         // Send any queued up messages
         ClientMsgType next_msg;
         while (comm_is_connected && comm_last_sent.type == CMSG_NONE && (next_msg = pop_msg())) {
+            #if 0
             char *next_msg_str;
             switch (next_msg) {
                 case CMSG_NONE: next_msg_str = "NONE"; break;
@@ -107,7 +108,8 @@ void *comm_thread_main(void *args)
                 case CMSG_LOUD: next_msg_str = "LOUD"; break;
                 case CMSG_SPED: next_msg_str = "SPED"; break;
             }
-            // printf("Sending message of type %s to Arduino\n", next_msg_str);
+            printf("Sending message of type %s to Arduino\n", next_msg_str);
+            #endif
             ClientMsg msg;
             switch (next_msg) {
                 case CMSG_NONE:
@@ -136,10 +138,15 @@ void *comm_thread_main(void *args)
                 case CMSG_PIDI:
                     if (next_msgs_contain_pidi()) goto skip_sending_message;
                     memset(comm_piano, 0, KEYS_AMOUNT);
-                    u8 active_keys_count = 0;
+                    PlayedKeyList played_keys = {0};
                     u32 i = 0;
-                    for (; i < comm_cmds.len && comm_cmds.data[i].time < comm_time; i++) {
-                        apply_pidi_cmd(comm_piano, comm_cmds.data, i, comm_cmds.len, &active_keys_count);
+                    u32 prev_cmd_time = 0;
+                    for (; i < comm_cmds.len && prev_cmd_time + comm_cmds.data[i].dt < comm_time; i++) {
+                        PidiCmd cmd = comm_cmds.data[i];
+                        if (prev_cmd_time + cmd.dt + cmd.len >= comm_time) {
+                            apply_pidi_cmd(comm_time, cmd, comm_piano, &played_keys);
+                        }
+                        prev_cmd_time += cmd.dt;
                     }
                     ClientMsgPidiData pidi = {
                         .time       = comm_time,
@@ -156,7 +163,7 @@ void *comm_thread_main(void *args)
             }
             comm_is_connected = send_msg(msg);
 skip_sending_message:
-            AIL_UNUSED(0); // to allow `skip_sending_message` to exist here
+            AIL_UNUSED(0); // to allow the label `skip_sending_message` to exist here
         }
 
         // Read data from port into ring buffer
@@ -227,7 +234,7 @@ bool next_msgs_contain_pidi(void)
     return false;
 }
 
-void send_new_song(AIL_DA(PidiCmd) cmds, f32 start_time)
+void send_new_song(AIL_DA(PidiCmd) cmds, u32 start_time)
 {
     while (pthread_mutex_lock(&comm_song_mutex) != 0) {}
     // printf("\033[33mSENDING NEW SONG at time %f\033[0m\n", start_time);
@@ -274,16 +281,14 @@ bool comm_setup_port(void) {
     if (!SetCommTimeouts(comm_port, &timeouts)) return false;
     if (!SetCommMask(comm_port, EV_RXCHAR)) return false;
     DCB dcb = {
-        .DCBlength    = sizeof(DCB),
-        .BaudRate     = BAUD_RATE,
-        .StopBits     = ONESTOPBIT,
-        .Parity       = (BYTE)PARITY_NONE,
-        .fOutxCtsFlow = false,
-        .fRtsControl  = RTS_CONTROL_DISABLE,
-        .fOutX        = false,
-        .fInX         = false,
-        .EofChar      = EOF,
-        .ByteSize     = 8,
+        .DCBlength       = sizeof(DCB),
+        .BaudRate        = BAUD_RATE,
+        .StopBits        = ONESTOPBIT,
+        .Parity          = (BYTE)PARITY_NONE,
+        .fOutX           = false,
+        .fInX            = false,
+        .EofChar         = EOF,
+        .ByteSize        = 8,
         .fDtrControl     = DTR_CONTROL_DISABLE,
         .fRtsControl     = RTS_CONTROL_DISABLE,
         .fOutxCtsFlow    = 0,
@@ -322,6 +327,7 @@ ServerMsgType check_for_msg(void)
         ServerMsgType type = ail_ring_read4msb(&comm_rb);
         u32 n = ail_ring_read4lsb(&comm_rb);
         (void)n; // @TODO
+        #if 0
         char *type_str;
         switch (type) {
             case SMSG_NONE: type_str = "NONE"; break;
@@ -330,7 +336,8 @@ ServerMsgType check_for_msg(void)
             case SMSG_SUCC: type_str = "SUCC"; break;
             default:        type_str = "Unknown"; break;
         }
-        // printf("Read message of type: %s\n", type_str);
+        printf("Read message of type: %s\n", type_str);
+        #endif
         return type;
     }
     return SMSG_NONE;

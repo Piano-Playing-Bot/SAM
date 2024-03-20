@@ -422,7 +422,7 @@ int main(void)
                             Song s = songs.data[i];
                             load_pidi(&s);
                             printf("\033[33mSending song with %d commands\033[0m\n", s.cmds.len);
-                            send_new_song(s.cmds, 0.0f);
+                            send_new_song(s.cmds, 0);
                             is_music_playing = true;
                             cur_music_len    = s.len;
                             cur_music_time   = 0;
@@ -540,7 +540,7 @@ int main(void)
 timeline_jump:
                             played_perc    = ((f32)(mouse.x - total_rect.x))/(f32)total_rect.width;
                             cur_music_time = AIL_LERP(played_perc, 0, cur_music_len);
-                            send_new_song(comm_cmds, cur_music_time);
+                            send_new_song(comm_cmds, (u32)cur_music_time);
                             timeline_selected = false;
                         }
                     }
