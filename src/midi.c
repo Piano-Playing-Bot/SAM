@@ -23,10 +23,16 @@ typedef struct {
 	ParseMidiResVal val;
 } ParseMidiRes;
 
+typedef struct PidiCmdTimed {
+    PidiCmd cmd;
+    u32 time;
+} PidiCmdTimed;
+AIL_DA_INIT(PidiCmdTimed);
+
 #define MIDI_MAX_VELOCITY 127
 #define MIDI_MIN_CMD_SIZE 3 // at least delta_time: 1, key: 1, velocity: 1
 #define MIDI_0KEY_OCTAVE -5
-#define MIDI_NOTE_TO_OCTAVE(note) (MIDI_0KEY_OCTAVE + ((note) / PIANO_KEY_AMOUNT))
+#define MIDI_NOTE_TO_OCTAVE(note) ((MIDI_0KEY_OCTAVE + ((note) / PIANO_KEY_AMOUNT)))
 #define MIDI_NOTE_TO_KEY(note)    ((note) % PIANO_KEY_AMOUNT)
 #define MIDI_TICKS_TO_MS(ticks, tempo, ticksPQN) ((ticks) * (u32)(((f32)(tempo) / (f32)(ticksPQN)) / 1000.0f))
 
@@ -34,6 +40,7 @@ u32 read_var_len(AIL_Buffer *buffer);
 ParseMidiRes parse_midi(AIL_Buffer buffer);
 void write_midi(Song song, const char *fpath);
 void sort_chunks(AIL_DA(PidiCmd) cmds);
+void write_timed_midi(const PidiCmdTimed *cmds, u32 len, const char *fpath);
 
 
 ParseMidiRes merge_sorted_chunks(AIL_DA(PidiCmdList) chunks, u64 *start_times) {
@@ -49,20 +56,19 @@ ParseMidiRes merge_sorted_chunks(AIL_DA(PidiCmdList) chunks, u64 *start_times) {
     for (u32 i = 0; i < total_count; i++) {
         i32 min = -1;
         for (i32 j = 0; j < (i32)chunks.len; j++) {
-            AIL_DA(PidiCmd) chunk = chunks.data[j];
-            if (indices[j] < chunk.len && (min < 0 || start_times[j] + chunks.data[j].data[indices[j]].dt < start_times[min] + chunks.data[min].data[indices[min]].dt)) {
+            if ((indices[j] < chunks.data[j].len) &&
+                ((min < 0) || (start_times[j] + chunks.data[j].data[indices[j]].dt < start_times[min] + chunks.data[min].data[indices[min]].dt))) {
                 min = j;
             }
         }
         AIL_ASSERT(min >= 0);
         start_times[min] += chunks.data[min].data[indices[min]].dt;
-        indices[min]++;
         cmds.data[i]    = chunks.data[min].data[indices[min]];
-        // DBG_LOG("start_times[%d]: %d, cur_time: %d\n", min, start_times[min], cur_time);
         AIL_ASSERT(start_times[min] >= cur_time);
         cmds.data[i].dt = start_times[min] - cur_time;
         cur_time       += cmds.data[i].dt;
         song_len        = AIL_MAX(song_len, cur_time + cmds.data[i].len*LEN_FACTOR);
+        indices[min]++;
     }
 
     free(indices);
@@ -129,7 +135,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
             // Parse MTrk events
             u32 delta_time  = read_var_len(&buffer);
             last_cmd_dt    += delta_time;
-            DBG_LOG("index: %#010llx, delta_time: %d\n", buffer.idx, delta_time);
+            // DBG_LOG("index: %#010llx, delta_time: %d\n", buffer.idx, delta_time);
             if (ail_buf_peek1(buffer) == 0xff) {
                 buffer.idx++;
                 // Meta Event
@@ -218,16 +224,17 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                         u8 note     = ail_buf_read1(&buffer);
                         u8 velocity = ail_buf_read1(&buffer);
                         i8 octave   = MIDI_NOTE_TO_OCTAVE(note);
+                        printf("octave: %d\n", octave);
                         u8 key      = MIDI_NOTE_TO_KEY(note);
                         if (command == 0x8 || !velocity) { // Note off
                             u16 len     = MIDI_TICKS_TO_MS(last_cmd_dt, tempo, ticksPQN);
-                            DBG_LOG("Note off: key=%d, octave=%d, len=%d\n", key, octave, len);
+                            // DBG_LOG("Note off: key=%d, octave=%d, len=%d\n", key, octave, len);
                             for (u32 k = pidi_chunk.len - 1; k < pidi_chunk.len; k--) {
                                 PidiCmd *cmd = &pidi_chunk.data[k];
-                                if (cmd->key == key && cmd->octave == octave) {
+                                if (pidi_key(*cmd) == key && pidi_octave(*cmd) == octave) {
                                     cmd->len = (len + LEN_FACTOR/2)/LEN_FACTOR; // +LEN_FACTOR/2 to do rounding
-                                    DBG_LOG("Found note: ");
-                                    print_cmd(*cmd);
+                                    // DBG_LOG("Found note: ");
+                                    // print_cmd(*cmd);
                                     break;
                                 } else {
                                     len += cmd->dt;
@@ -311,7 +318,44 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
 
 void write_midi(Song song, const char *fpath)
 {
-    DBG_LOG("Writing %s back to midi in %s\n", song.name, fpath);
+    AIL_DA(PidiCmdTimed) cmds = ail_da_new_with_cap(PidiCmdTimed, song.cmds.len*2);
+    for (u32 i = 0, time = 0; i < song.cmds.len; i++) {
+        time += song.cmds.data[i].dt;
+        PidiCmdTimed on = {
+            .cmd  = song.cmds.data[i],
+            .time = time,
+        };
+        PidiCmdTimed off = {
+            .cmd = (PidiCmd) {
+                .velocity = 0,
+                .octave   = on.cmd.octave,
+                .key      = on.cmd.key,
+            },
+            .time = time + on.cmd.len*LEN_FACTOR,
+        };
+        ail_da_push(&cmds, on);
+        ail_da_push(&cmds, off);
+    }
+
+    // Sort cmds
+    for (u32 i = 0; i < cmds.len-1; i++) {
+        u32 min = i;
+        for (u32 j = i+1; j < cmds.len; j++) {
+            if (cmds.data[j].time < cmds.data[min].time) min = j;
+        }
+        AIL_SWAP_PORTABLE(PidiCmdTimed, cmds.data[min], cmds.data[i]);
+    }
+    for (u32 i = 0; i < cmds.len; i++) {
+        printf("time: %4dms, ", cmds.data[i].time);
+        print_cmd(cmds.data[i].cmd);
+    }
+
+    write_timed_midi(cmds.data, cmds.len, fpath);
+}
+
+void write_timed_midi(const PidiCmdTimed *cmds, u32 len, const char *fpath)
+{
+    // DBG_LOG("Writing %s back to midi in %s\n", song.name, fpath);
     AIL_Buffer buffer = ail_buf_new(2048);
     u16 ticksPQN = 480;
     u32 tempo = 705882; // 500000;
@@ -363,46 +407,12 @@ void write_midi(Song song, const char *fpath)
     ail_buf_write3msb(&buffer, 0x00ff21);
     ail_buf_write2msb(&buffer, 0x0100);
 
-    // Notes
-    typedef struct PidiCmdTimed {
-        PidiCmd cmd;
-        u32 time;
-    } PidiCmdTimed;
-    AIL_DA_INIT(PidiCmdTimed);
-    AIL_DA(PidiCmdTimed) cmds = ail_da_new_with_cap(PidiCmdTimed, song.cmds.len*2);
-    for (u32 i = 0, time = 0; i < song.cmds.len; i++) {
-        time += song.cmds.data[i].dt;
-        PidiCmdTimed on = {
-            .cmd  = song.cmds.data[i],
-            .time = time,
-        };
-        PidiCmdTimed off = {
-            .cmd = (PidiCmd) {
-                .velocity = 0,
-                .octave   = on.cmd.octave,
-                .key      = on.cmd.key,
-            },
-            .time = time + on.cmd.len*LEN_FACTOR,
-        };
-        ail_da_push(&cmds, on);
-        ail_da_push(&cmds, off);
-    }
-
-    // Sort cmds
-    for (u32 i = 0; i < cmds.len-1; i++) {
-        u32 min = i;
-        for (u32 j = i+1; j < cmds.len; j++) {
-            if (cmds.data[j].time < cmds.data[min].time) min = j;
-        }
-        AIL_SWAP_PORTABLE(PidiCmdTimed, cmds.data[min], cmds.data[i]);
-    }
-
     u32 last_tick = 0;
-    for (u32 i = 0; i < cmds.len; i++) {
-        PidiCmdTimed c = cmds.data[i];
-        u32 delta_time = (c.time - last_tick) / (u64)(((f32)tempo / (f32)ticksPQN) / 1000.0f);
-        last_tick      = c.time;
-        // DBG_LOG("time: %lld, cur_tick: %lld, last_tick: %lld\n", c.time, cur_tick, last_tick);
+    for (u32 i = 0; i < len; i++) {
+        PidiCmdTimed c = cmds[i];
+        u32 cur_tick   = c.time / (u64)(((f32)tempo / (f32)ticksPQN) / 1000.0f);
+        u32 delta_time = cur_tick - last_tick;
+        last_tick      = cur_tick;
 
         // Write variable length field for delta_time
         u32 x = delta_time & 0x7f;
@@ -417,10 +427,9 @@ void write_midi(Song song, const char *fpath)
             else break;
         }
 
-        // DBG_LOG("index: %#010llx, delta_time: %u\n", buffer.idx, dt);
         if (i == 0) ail_buf_write1(&buffer, 0x90);
-        ail_buf_write1(&buffer, (c.cmd.octave - MIDI_0KEY_OCTAVE)*PIANO_KEY_AMOUNT + c.cmd.key);
-        ail_buf_write1(&buffer, AIL_LERP((f32)c.cmd.velocity/(f32)(MAX_VELOCITY), 0, MIDI_MAX_VELOCITY));
+        ail_buf_write1(&buffer, (pidi_octave(c.cmd) - MIDI_0KEY_OCTAVE)*PIANO_KEY_AMOUNT + pidi_key(c.cmd));
+        ail_buf_write1(&buffer, (u32)AIL_LERP((f32)c.cmd.velocity/(f32)(MAX_VELOCITY), 0, MIDI_MAX_VELOCITY));
     }
 
     ail_buf_write4msb(&buffer, 0x01ff2f00);
