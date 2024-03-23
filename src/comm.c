@@ -22,6 +22,7 @@
 
 #define NEXT_MSGS_COUNT 4
 #define SEND_MSG_MAX_RETRIES 8
+#define MAX_BYTES_TO_SEND_AT_ONCE 8
 
 typedef struct NextMsgRing {
     ClientMsgType data[NEXT_MSGS_COUNT];
@@ -274,16 +275,14 @@ bool comm_setup_port(void) {
     if (!SetCommTimeouts(comm_port, &timeouts)) return false;
     if (!SetCommMask(comm_port, EV_RXCHAR)) return false;
     DCB dcb = {
-        .DCBlength    = sizeof(DCB),
-        .BaudRate     = BAUD_RATE,
-        .StopBits     = ONESTOPBIT,
-        .Parity       = (BYTE)PARITY_NONE,
-        .fOutxCtsFlow = false,
-        .fRtsControl  = RTS_CONTROL_DISABLE,
-        .fOutX        = false,
-        .fInX         = false,
-        .EofChar      = EOF,
-        .ByteSize     = 8,
+        .DCBlength       = sizeof(DCB),
+        .BaudRate        = BAUD_RATE,
+        .StopBits        = ONESTOPBIT,
+        .Parity          = (BYTE)PARITY_NONE,
+        .fOutX           = false,
+        .fInX            = false,
+        .EofChar         = EOF,
+        .ByteSize        = 8,
         .fDtrControl     = DTR_CONTROL_DISABLE,
         .fRtsControl     = RTS_CONTROL_DISABLE,
         .fOutxCtsFlow    = 0,
@@ -351,7 +350,6 @@ ServerMsgType wait_for_reply(void)
 
 bool send_msg(ClientMsg msg)
 {
-#define MAX_BYTES_TO_SEND_AT_ONCE 32
     u8 msgBuffer[MAX_CLIENT_MSG_SIZE] = {0};
     AIL_Buffer buffer = {
         .data = msgBuffer,
@@ -418,7 +416,7 @@ bool send_msg(ClientMsg msg)
         AIL_ASSERT(res);
         AIL_ASSERT(written == toWrite);
         buffer_idx += toWrite;
-        if (buffer_idx < buffer.len) ail_time_sleep(5);
+        if (buffer_idx < buffer.len) ail_time_sleep(50);
     } while (toWrite);
     comm_last_sent = msg;
     last_comm_time = ail_time_clock_start();
