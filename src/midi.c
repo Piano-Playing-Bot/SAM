@@ -111,7 +111,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
         AIL_TODO();
     }
 
-    DBG_LOG("format: %d, ntrcks: %d, ticks per quarter-note: %d\n", format, ntrcks, ticksPQN);
+    // DBG_LOG("format: %d, ntrcks: %d, ticks per quarter-note: %d\n", format, ntrcks, ticksPQN);
 
     if (format > 2) {
         sprintf(val.err, "Unknown Midi Format.\nPlease try a different Midi File\n");
@@ -130,7 +130,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
         u32 chunk_len   = ail_buf_read4msb(&buffer);
         u32 chunk_end   = buffer.idx + chunk_len;
         AIL_DA(PidiCmd) pidi_chunk = ail_da_new_with_cap(PidiCmd, chunk_len/MIDI_MIN_CMD_SIZE);
-        DBG_LOG("Parsing cmd from %#010llx to %#010x\n", buffer.idx, chunk_end);
+        // DBG_LOG("Parsing cmd from %#010llx to %#010x\n", buffer.idx, chunk_end);
         while (buffer.idx < chunk_end) {
             // Parse MTrk events
             u32 delta_time  = read_var_len(&buffer);
@@ -168,7 +168,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                         AIL_ASSERT(ail_buf_read1(&buffer) == 3);
                         // u32 x = ail_buf_read3msb(&buffer);
                         tempo = ail_buf_read3msb(&buffer);
-                        DBG_LOG("tempo: %u\n", tempo);
+                        // DBG_LOG("tempo: %u\n", tempo);
                     } break;
                     case 0x54: { // SMPTE Offset
                         AIL_ASSERT(ail_buf_read1(&buffer) == 5);
@@ -224,7 +224,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                         u8 note     = ail_buf_read1(&buffer);
                         u8 velocity = ail_buf_read1(&buffer);
                         i8 octave   = MIDI_NOTE_TO_OCTAVE(note);
-                        printf("octave: %d\n", octave);
+                        // DBG_LOG("octave: %d\n", octave);
                         u8 key      = MIDI_NOTE_TO_KEY(note);
                         if (command == 0x8 || !velocity) { // Note off
                             u16 len     = MIDI_TICKS_TO_MS(last_cmd_dt, tempo, ticksPQN);
@@ -249,8 +249,8 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                                 .key      = key,
                             };
                             ail_da_push(&pidi_chunk, cmd);
-                            DBG_LOG("\033[32mNote on: \033[0m");
-                            print_cmd(cmd);
+                            // DBG_LOG("\033[32mNote on: \033[0m");
+                            // print_cmd(cmd);
                             last_cmd_dt = 0;
                         }
                     } break;
@@ -260,7 +260,7 @@ ParseMidiRes parse_midi(AIL_Buffer buffer)
                     case 0xB: { // Control Change
                         u8 c = ail_buf_read1(&buffer);
                         u8 v = ail_buf_read1(&buffer);
-                        // DBG_LOG("Control Change: c = %#01x, v = %#01x\n", c, v);
+                        DBG_LOG("Control Change: c = %#01x, v = %#01x\n", c, v);
                         AIL_ASSERT(v <= 127);
                         if (c < 120) {
                             // Do nothing for now
