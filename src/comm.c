@@ -22,6 +22,7 @@
 
 #define NEXT_MSGS_COUNT 4
 #define SEND_MSG_MAX_RETRIES 8
+#define MAX_BYTES_TO_SEND_AT_ONCE 16
 
 typedef struct NextMsgRing {
     ClientMsgType data[NEXT_MSGS_COUNT];
@@ -362,7 +363,6 @@ bool send_msg(ClientMsg msg)
     }
     printf("Sending message of type %s to Arduino\n", msg_str);
 #endif
-#define MAX_BYTES_TO_SEND_AT_ONCE 4
     u8 msgBuffer[MAX_CLIENT_MSG_SIZE] = {0};
     AIL_Buffer buffer = {
         .data = msgBuffer,
