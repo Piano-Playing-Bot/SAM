@@ -21,13 +21,16 @@ CFLAGS   += $(INCLUDES) $(LIBS)
 
 .PHONY: clean main
 
-all: main commTest midiTest test print_bin
+all: main commTest pidiTest midiTest test print_bin
 
 main: bin/libraylib.a src/main.c src/midi.c src/comm.c
 	$(CC) -o bin/main src/main.c $(CFLAGS)
 
 commTest: src/commTest.c
 	$(CC) -o commTest src/commTest.c $(CFLAGS)
+
+pidiTest: src/pidiTest.c
+	$(CC) -o pidiTest src/pidiTest.c $(CFLAGS)
 
 midiTest: src/midiTest.c
 	$(CC) -o midiTest src/midiTest.c $(CFLAGS)
