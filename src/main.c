@@ -130,6 +130,7 @@ int main(void)
     RL_Texture play_icon   = get_texture("assets/play.png");
     RL_Texture speed_icon  = get_texture("assets/speed.png");
     RL_Texture volume_icon = get_texture("assets/volume.png");
+    RL_Texture back_icon   = get_texture("assets/back.png");
     bool paused = false;
     bool muted  = false;
     f32  speed  = 1.0f;
@@ -172,8 +173,13 @@ int main(void)
         .vAlign       = AIL_GUI_ALIGN_C,
     };
     AIL_Gui_Style style_button_hover = ail_gui_cloneStyle(style_button_default);
-    style_button_hover.border_color = (RL_Color){ 9, 170,  6, 255};
+    style_button_hover.border_color = (RL_Color){ 9, 170,  6, 255 };
     style_button_hover.border_width = 5;
+    AIL_Gui_Style style_button_disabled_default = ail_gui_cloneStyle(style_button_default);
+    style_button_disabled_default.bg = RL_GRAY;
+    AIL_Gui_Style style_button_disabled_hover = ail_gui_cloneStyle(style_button_disabled_default);
+    style_button_disabled_hover.border_color = (RL_Color){ 100, 100, 100, 255 };
+    style_button_disabled_hover.border_width = 5;
     AIL_Gui_Style style_song_name_default = {
         .color        = RL_WHITE,
         .bg           = RL_LIGHTGRAY,
@@ -347,7 +353,7 @@ int main(void)
                 // Show library otherwise
                 else {
                     RL_Color conn_color = comm_is_connected ? RL_GREEN : RL_BLANK;
-                    DrawCircle(     header_bounds.x + conn_circ_radius, header_bounds.y + conn_circ_radius + header_y_pad, conn_circ_radius, conn_color);
+                    DrawCircle     (header_bounds.x + conn_circ_radius, header_bounds.y + conn_circ_radius + header_y_pad, conn_circ_radius, conn_color);
                     DrawCircleLines(header_bounds.x + conn_circ_radius, header_bounds.y + conn_circ_radius + header_y_pad, conn_circ_radius, RL_WHITE);
 
                     AIL_Gui_State upload_button_state = ail_gui_drawLabel(upload_button);
@@ -568,11 +574,21 @@ timeline_jump:
             } break;
 
             case UI_VIEW_DND: {
-                static char *dnd_view_msg  = "Drag-and-Drop a MIDI-File to play it on the Piano";
+                static char *dnd_view_msg;
+                if (view_changed || view_prev_changed) {
+                    RL_UnloadDroppedFiles(RL_LoadDroppedFiles());
+                    dnd_view_msg = "Drag-and-Drop a MIDI-File to play it on the Piano";
+                }
+
+                bool pressed = false;
+                draw_icon(back_icon, 0, header_bounds.x, header_bounds.y, icon_size, &pressed);
+                if (pressed) {
+                    SET_VIEW(UI_VIEW_LIBRARY);
+                }
+
                 centered_label.text = ail_da_from_parts(char, dnd_view_msg, strlen(dnd_view_msg), strlen(dnd_view_msg), &ail_default_allocator);
                 ail_gui_drawLabel(centered_label);
 
-                if (view_changed || view_prev_changed) RL_UnloadDroppedFiles(RL_LoadDroppedFiles());
                 if (RL_IsFileDropped()) {
                     RL_FilePathList dropped_files = RL_LoadDroppedFiles();
                     AIL_SV fpath = ail_sv_from_cstr(dropped_files.paths[0]);
@@ -586,7 +602,6 @@ timeline_jump:
                         u64 path_len = strlen(dropped_files.paths[0]);
                         file_path   = malloc(sizeof(char) * (path_len + 1));
                         memcpy(file_path, dropped_files.paths[0], path_len + 1);
-                        dnd_view_msg = file_path;
                         pthread_create(&fileParsingThread, NULL, parse_file, (void *)file_path);
                     }
                     RL_UnloadDroppedFiles(dropped_files);
@@ -595,24 +610,33 @@ timeline_jump:
 
             case UI_VIEW_ADD: {
                 static bool              btn_selected = false;
-                static RL_Rectangle      input_bounds = {0};
-                static AIL_Gui_Label     name_label   = {0};
-                static AIL_Gui_Input_Box name_input   = {0};
-                static AIL_Gui_Label     add_button   = {0};
+                static RL_Rectangle      input_bounds = { 0 };
+                static AIL_Gui_Label     name_label   = { 0 };
+                static AIL_Gui_Input_Box name_input   = { 0 };
                 if (requires_recalc) {
                     u32 input_margin = AIL_MAX(5, win_width - AIL_CLAMP(win_width*8/10, 200, 1000));
                     input_bounds = (RL_Rectangle) { input_margin, (win_height - style_default.font_size) / 2, win_width - 2*input_margin, style_default.font_size + 2*style_default.pad };
                     name_label   = ail_gui_newLabel(input_bounds, name_label.text.data ? name_label.text.data : filename, style_default, style_default);
                     name_input   = ail_gui_newInputBox("Name of RL_Music", false, false, true, name_label);
                 }
+
+                bool pressed = false;
+                draw_icon(back_icon, 0, header_bounds.x, header_bounds.y, icon_size, &pressed);
+                if (pressed) {
+                    // @Memory: Potentially leaking `song_name` here...
+                    SET_VIEW(UI_VIEW_LIBRARY);
+                }
+
+                bool valid_name = name_input.label.text.len > 0 && !is_songname_taken(name_input.label.text.data);
                 AIL_Gui_Style input_style = ail_gui_cloneStyle(style_default);
                 input_style.border_width      = 5;
-                input_style.border_color      = is_songname_taken(name_input.label.text.data) ? RL_RED : RL_GREEN;
+                input_style.border_color      = valid_name ? RL_GREEN : RL_RED;
                 input_style.bg                = BG_COLOR;
+                name_input.label              = name_label;
                 name_input.label.defaultStyle = input_style;
                 name_input.label.hovered      = input_style;
                 name_input.selected           = !btn_selected;
-                AIL_Gui_Update_Res res = ail_gui_drawInputBox(&name_input);
+                AIL_Gui_Update_Res res        = ail_gui_drawInputBox(&name_input);
 
                 u32 btn_text_size     = MeasureTextEx(style_button_default.font, upload_btn_msg, style_button_default.font_size, style_button_default.cSpacing).x;
                 i32 btn_width         = btn_text_size + 2*style_button_default.border_width + 2*style_button_default.pad;
@@ -622,15 +646,16 @@ timeline_jump:
                     btn_width,
                     style_button_default.font_size + 2*style_button_default.pad
                 };
-                add_button = ail_gui_newLabel(button_bounds, upload_btn_msg, style_button_default, style_button_hover);
-                AIL_Gui_State btn_res = ail_gui_drawLabel(add_button);
+                AIL_Gui_Label add_button = ail_gui_newLabel(button_bounds, upload_btn_msg, valid_name ? style_button_default : style_button_disabled_default, valid_name ? style_button_hover : style_button_disabled_hover);
+                AIL_Gui_State btn_res    = ail_gui_drawLabel(add_button);
+                ail_gui_freeLabel(&add_button);
 
                 if (res.tab || IsKeyPressed(KEY_TAB))   btn_selected = !btn_selected;
                 if (res.state >= AIL_GUI_STATE_PRESSED) btn_selected = false;
-                if (res.enter || btn_res >= AIL_GUI_STATE_PRESSED) {
-                    free(song_name);
+                if (valid_name && (res.enter || btn_res >= AIL_GUI_STATE_PRESSED)) {
                     song_name = name_input.label.text.data;
                     DBG_LOG("song_name: %s\n", song_name);
+                    // @Memory: Potentially leaking `song_name` here???
                     SET_VIEW(UI_VIEW_PARSING_SONG);
                 }
             } break;
