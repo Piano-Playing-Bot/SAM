@@ -386,7 +386,7 @@ int main(void)
 
                     static AIL_DA(Song) songs;
                     if (search_res.updated && search_input_box.label.text.len) {
-                        if (songs.data != library.data) ail_da_free(&songs);
+                        if (songs.data != library.data && songs.data) ail_da_free(&songs);
                         songs = search_songs(search_input_box.label.text.data);
                     } else if (!songs.data || library_updated) songs = library;
 
@@ -782,13 +782,13 @@ AIL_DA(Song) search_songs(const char *substr)
     AIL_DA(Song) prefixed    = ail_da_new(Song);
     AIL_DA(Song) substringed = ail_da_new(Song);
     u32 substr_len = strlen(substr);
-    DBG_LOG("substr: %s\n", substr);
-    DBG_LOG("library: { data: %p, len: %d, cap: %d }\n", (void *)library.data, library.len, library.cap);
+    // DBG_LOG("substr: %s\n", substr);
+    // DBG_LOG("library: { data: %p, len: %d, cap: %d }\n", (void *)library.data, library.len, library.cap);
     for (u32 i = 0; i < library.len; i++) {
         // Check for prefix
-        DBG_LOG("i: %d, s: %s\n", i, library.data[i].name);
+        // DBG_LOG("i: %d, s: %s\n", i, library.data[i].name);
         if (is_prefix(substr, library.data[i].name, true)) {
-            DBG_LOG("is prefix\n");
+            // DBG_LOG("is prefix\n");
             ail_da_push(&prefixed, library.data[i]);
         } else {
             // Check for substring
@@ -796,11 +796,11 @@ AIL_DA(Song) search_songs(const char *substr)
             u32 name_len = strlen(library.data[i].name);
             if (name_len > substr_len) {
                 for (u32 j = 1; !is_substr && j <= name_len - substr_len; j++) {
-                    DBG_LOG("j: %d\n", j);
+                    // DBG_LOG("j: %d\n", j);
                     is_substr = is_prefix(substr, &library.data[i].name[j], true);
                 }
             }
-            if (is_substr) DBG_LOG("is substring\n");
+            // if (is_substr) DBG_LOG("is substring\n");
             if (is_substr) ail_da_push(&substringed, library.data[i]);
         }
     }
