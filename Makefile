@@ -21,7 +21,7 @@ CFLAGS   += $(INCLUDES) $(LIBS)
 
 .PHONY: clean main
 
-all: main commTest pidiTest midiTest test print_bin pidi_maker
+all: main commTest pidiTest midiTest test print_bin pidi_maker showPidi
 
 main: bin/libraylib.a src/main.c src/midi.c src/comm.c
 	$(CC) -o bin/main src/main.c $(CFLAGS)
@@ -43,6 +43,9 @@ print_bin: src/print_bin.c
 
 pidi_maker: src/pidi_maker.c
 	$(CC) -o pidi_maker src/pidi_maker.c $(CFLAGS)
+
+showPidi: src/showPidi.c
+	$(CC) -o showPidi src/showPidi.c $(CFLAGS)
 
 export PLATFORM=PLATFORM_DESKTOP
 export RAYLIB_LIBTYPE=STATIC
