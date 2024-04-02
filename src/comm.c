@@ -36,6 +36,7 @@ AIL_DA_INIT(MsgPidiPlayedKey);
 // No other thread should write to these variables
 static void *comm_port             = 0;    // Handle to the Port that is connected to the Arduino - Only find_server_port writes this value
 static bool  comm_is_music_playing = false;
+static bool  comm_is_paused        = false;
 static bool  comm_is_connected     = false;
 static f32   comm_volume           = 1.0f;
 static f32   comm_speed            = 1.0f;
@@ -176,6 +177,19 @@ skip_sending_message:
                 switch (res) {
                     case SMSG_PONG:
                     case SMSG_SUCC:
+                        switch (comm_last_sent.type) {
+                            case CMSG_PIDI:
+                                comm_is_music_playing = true;
+                                break;
+                            case CMSG_CONT:
+                                comm_is_paused = false;
+                                break;
+                            case CMSG_STOP:
+                                comm_is_paused = true;
+                                break;
+                            default:
+                                break;
+                        }
                         comm_last_sent = (ClientMsg){0}; // indicates, that last message was received successfully by arduino
                         break;
                     case SMSG_REQP: {

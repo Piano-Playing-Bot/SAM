@@ -131,7 +131,6 @@ int main(void)
     RL_Texture speed_icon  = get_texture("assets/speed.png");
     RL_Texture volume_icon = get_texture("assets/volume.png");
     RL_Texture back_icon   = get_texture("assets/back.png");
-    bool paused = false;
     bool muted  = false;
     f32  speed  = 1.0f;
     f32  volume = 1.0f;
@@ -432,6 +431,7 @@ int main(void)
                             is_music_playing = true;
                             cur_music_len    = s.len;
                             cur_music_time   = 0;
+                            set_paused(false);
                         }
                     }
                 }
@@ -480,10 +480,9 @@ int main(void)
                             set_speed(speed);
                         }
                         icon_x += icon_size + icon_pad;
-                        any_icon_hovered |= draw_icon(play_icon, !paused, icon_x, icon_y, icon_size, &pressed);
+                        any_icon_hovered |= draw_icon(play_icon, !comm_is_paused, icon_x, icon_y, icon_size, &pressed);
                         if (pressed) {
-                            paused = !paused;
-                            set_paused(paused);
+                            set_paused(!comm_is_paused);
                         }
                         icon_x += icon_size + icon_pad;
                         any_icon_hovered |= draw_icon(speed_icon, 1, icon_x, icon_y, icon_size, &pressed);
@@ -567,7 +566,7 @@ timeline_jump:
                         DrawRectangleRounded(played_rect, 5.0f, 5, RL_RED);
                         DrawCircle(x_circle, played_rect.y + played_rect.height/2, play_circ_radius, RL_RED);
 
-                        if (!paused) cur_music_time += speed * RL_GetFrameTime() * 1000.0f;
+                        if (!comm_is_paused) cur_music_time += speed * RL_GetFrameTime() * 1000.0f;
                     }
                 }
                 // Otherwise if Arduino is not connected, show text reminding user to connect
