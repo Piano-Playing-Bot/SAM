@@ -74,7 +74,7 @@ typedef enum {
 static inline bool draw_icon(RL_Texture icon, u8 texture_idx, f32 x, f32 y, f32 icon_size, bool *pressed);
 RL_Texture get_texture(const char *filepath);
 AIL_DA(Song) search_songs(const char *substr);
-void draw_loading_anim(u32 win_width, u32 win_height, bool start_new);
+void draw_loading_anim(RL_Rectangle bounds, bool start_new);
 bool is_songname_taken(const char *name);
 void  load_pidi(Song *song);
 bool  save_pidi(Song song);
@@ -439,132 +439,136 @@ int main(void)
 
                 // If music is playing -> show timeline & music controls
                 if (is_music_playing) {
-                    static bool timeline_selected = false;
-                    f32 played_perc = AIL_MIN(cur_music_time / cur_music_len, 1.0f);
-                    RL_Rectangle total_rect = {
-                        .x      = play_bounds.x,
-                        .y      = play_bounds.y + play_bounds.height - play_timeline_height - play_bounds_pad,
-                        .width  = play_bounds.width,
-                        .height = play_timeline_height,
-                    };
-
-                    RL_Vector2 mouse = GetMousePosition();
-                    bool timeline_hovered = ail_gui_isPointInRec(mouse.x, mouse.y, total_rect.x, total_rect.y - 2*total_rect.height, total_rect.width, 4*total_rect.height);
-
-                    // Draw Icons
-                    bool any_icon_hovered = false;
-                    #define FLOAT_TEXT_LEN 8
-                    static char speed_text[FLOAT_TEXT_LEN] = {0};
-                    { // snprintf(speed_text, FLOAT_TEXT_LEN, "%.2fx", speed) except no decimal digits are printed if they are 0
-                        u8 d1 = ((u8)(speed*10 ))%10;
-                        u8 d2 = ((u8)(speed*100))%10;
-                        if (!d1 && !d2) snprintf(speed_text, FLOAT_TEXT_LEN, "%.0fx", speed);
-                        else if (!d2)   snprintf(speed_text, FLOAT_TEXT_LEN, "%.1fx", speed);
-                        else            snprintf(speed_text, FLOAT_TEXT_LEN, "%.2fx", speed);
-                    }
-                    RL_Vector2 speed_text_size = MeasureTextEx(font, speed_text, size_smaller, 0);
-                    RL_Vector2 speed_text_pos  = {
-                        .x = icon_bounds.x + speed_max_size - speed_text_size.x,
-                        .y = icon_bounds.y + (icon_bounds.height - speed_text_size.y)/2,
-                    };
-                    RL_DrawTextEx(font, speed_text, speed_text_pos, size_smaller, 0, RL_WHITE);
-                    f32 icon_x = icon_bounds.x + speed_max_size + icon_pad;
-                    f32 icon_y = icon_bounds.y;
-                    bool pressed;
-                    any_icon_hovered |= draw_icon(speed_icon, 0, icon_x, icon_y, icon_size, &pressed);
-                    if (pressed) {
-                        speed = AIL_MAX(speed - 0.25f, MIN_SPEED);
-                        set_speed(speed);
-                    }
-                    icon_x += icon_size + icon_pad;
-                    any_icon_hovered |= draw_icon(play_icon, !paused, icon_x, icon_y, icon_size, &pressed);
-                    if (pressed) {
-                        paused = !paused;
-                        set_paused(paused);
-                    }
-                    icon_x += icon_size + icon_pad;
-                    any_icon_hovered |= draw_icon(speed_icon, 1, icon_x, icon_y, icon_size, &pressed);
-                    if (pressed) {
-                        speed = AIL_MIN(speed + 0.25f, MAX_SPEED);
-                        set_speed(speed);
-                    }
-                    icon_x += icon_size + icon_pad;
-                    static bool volume_hovered = false;
-                    bool volume_icon_hovered = draw_icon(volume_icon, (muted || volume < 0.1f) ? 0 : 1 + (volume >= 0.5f), icon_x, icon_y, icon_size, &pressed);
-                    icon_x += icon_size + icon_pad;
-                    if (pressed) {
-                        muted = !muted;
-                        if (muted) set_volume(0.0f);
-                        else set_volume(volume);
-                    }
-                    if (volume_hovered || volume_icon_hovered) {
-                        RL_Rectangle volume_slider = {
-                            .x = icon_x,
-                            .y = icon_y + (icon_size - volume_slider_height)/2,
-                            .width  = volume_slider_width,
-                            .height = volume_slider_height,
+                    if (!comm_is_music_playing) {
+                        draw_loading_anim(play_bounds, false);
+                    } else {
+                        static bool timeline_selected = false;
+                        f32 played_perc = AIL_MIN(cur_music_time / cur_music_len, 1.0f);
+                        RL_Rectangle total_rect = {
+                            .x      = play_bounds.x,
+                            .y      = play_bounds.y + play_bounds.height - play_timeline_height - play_bounds_pad,
+                            .width  = play_bounds.width,
+                            .height = play_timeline_height,
                         };
-                        RL_Rectangle volume_slider_filled = volume_slider;
-                        volume_slider_filled.y      -= 2.0f;
-                        volume_slider_filled.height += 4.0f;
 
-                        // @TODO: Show volume in percentage on screen?
-                        volume_hovered = ail_gui_isPointInRec(mouse.x, mouse.y, icon_x - icon_pad, icon_y, volume_slider.width + 4*icon_pad, icon_size);
-                        if (ail_gui_isPointInRec(mouse.x, mouse.y, icon_x, volume_slider.y - 2*volume_slider.height, volume_slider.width, 4*volume_slider.height)) {
+                        RL_Vector2 mouse = GetMousePosition();
+                        bool timeline_hovered = ail_gui_isPointInRec(mouse.x, mouse.y, total_rect.x, total_rect.y - 2*total_rect.height, total_rect.width, 4*total_rect.height);
+
+                        // Draw Icons
+                        bool any_icon_hovered = false;
+                        #define FLOAT_TEXT_LEN 8
+                        static char speed_text[FLOAT_TEXT_LEN] = {0};
+                        { // snprintf(speed_text, FLOAT_TEXT_LEN, "%.2fx", speed) except no decimal digits are printed if they are 0
+                            u8 d1 = ((u8)(speed*10 ))%10;
+                            u8 d2 = ((u8)(speed*100))%10;
+                            if (!d1 && !d2) snprintf(speed_text, FLOAT_TEXT_LEN, "%.0fx", speed);
+                            else if (!d2)   snprintf(speed_text, FLOAT_TEXT_LEN, "%.1fx", speed);
+                            else            snprintf(speed_text, FLOAT_TEXT_LEN, "%.2fx", speed);
+                        }
+                        RL_Vector2 speed_text_size = MeasureTextEx(font, speed_text, size_smaller, 0);
+                        RL_Vector2 speed_text_pos  = {
+                            .x = icon_bounds.x + speed_max_size - speed_text_size.x,
+                            .y = icon_bounds.y + (icon_bounds.height - speed_text_size.y)/2,
+                        };
+                        RL_DrawTextEx(font, speed_text, speed_text_pos, size_smaller, 0, RL_WHITE);
+                        f32 icon_x = icon_bounds.x + speed_max_size + icon_pad;
+                        f32 icon_y = icon_bounds.y;
+                        bool pressed;
+                        any_icon_hovered |= draw_icon(speed_icon, 0, icon_x, icon_y, icon_size, &pressed);
+                        if (pressed) {
+                            speed = AIL_MAX(speed - 0.25f, MIN_SPEED);
+                            set_speed(speed);
+                        }
+                        icon_x += icon_size + icon_pad;
+                        any_icon_hovered |= draw_icon(play_icon, !paused, icon_x, icon_y, icon_size, &pressed);
+                        if (pressed) {
+                            paused = !paused;
+                            set_paused(paused);
+                        }
+                        icon_x += icon_size + icon_pad;
+                        any_icon_hovered |= draw_icon(speed_icon, 1, icon_x, icon_y, icon_size, &pressed);
+                        if (pressed) {
+                            speed = AIL_MIN(speed + 0.25f, MAX_SPEED);
+                            set_speed(speed);
+                        }
+                        icon_x += icon_size + icon_pad;
+                        static bool volume_hovered = false;
+                        bool volume_icon_hovered = draw_icon(volume_icon, (muted || volume < 0.1f) ? 0 : 1 + (volume >= 0.5f), icon_x, icon_y, icon_size, &pressed);
+                        icon_x += icon_size + icon_pad;
+                        if (pressed) {
+                            muted = !muted;
+                            if (muted) set_volume(0.0f);
+                            else set_volume(volume);
+                        }
+                        if (volume_hovered || volume_icon_hovered) {
+                            RL_Rectangle volume_slider = {
+                                .x = icon_x,
+                                .y = icon_y + (icon_size - volume_slider_height)/2,
+                                .width  = volume_slider_width,
+                                .height = volume_slider_height,
+                            };
+                            RL_Rectangle volume_slider_filled = volume_slider;
+                            volume_slider_filled.y      -= 2.0f;
+                            volume_slider_filled.height += 4.0f;
+
+                            // @TODO: Show volume in percentage on screen?
+                            volume_hovered = ail_gui_isPointInRec(mouse.x, mouse.y, icon_x - icon_pad, icon_y, volume_slider.width + 4*icon_pad, icon_size);
+                            if (ail_gui_isPointInRec(mouse.x, mouse.y, icon_x, volume_slider.y - 2*volume_slider.height, volume_slider.width, 4*volume_slider.height)) {
+                                SET_CURSOR(MOUSE_CURSOR_POINTING_HAND);
+                                if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                                    volume = AIL_LERP(AIL_CLAMP(AIL_REV_LERP(mouse.x, volume_slider.x, volume_slider.x + volume_slider.width), 0.0f, 1.0f), MIN_VOLUME, MAX_VOLUME);
+                                    muted  = false;
+                                    set_volume(volume);
+                                }
+                            }
+                            volume_hovered |= volume_icon_hovered;
+
+                            DrawRectangleRounded(volume_slider, 5.0f, 5, RL_GRAY);
+                            DrawRectangleRounded(volume_slider_filled, 5.0f, 5, RL_RED);
+                            DrawCircle(volume_slider.x + volume/MAX_VOLUME*volume_slider.width, volume_slider.y + volume_slider.height/2, volume_circ_radius, RL_RED);
+                        }
+                        any_icon_hovered |= volume_hovered;
+
+                        if (any_icon_hovered) {
+                            timeline_selected = false;
+                            timeline_hovered  = false;
+                        }
+
+                        f32 x_circle;
+                        if (timeline_selected) {
                             SET_CURSOR(MOUSE_CURSOR_POINTING_HAND);
                             if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-                                volume = AIL_LERP(AIL_CLAMP(AIL_REV_LERP(mouse.x, volume_slider.x, volume_slider.x + volume_slider.width), 0.0f, 1.0f), MIN_VOLUME, MAX_VOLUME);
-                                muted  = false;
-                                set_volume(volume);
+                                x_circle = mouse.x;
+                            } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                                goto timeline_jump;
+                            }
+                        } else if (timeline_hovered) {
+                            SET_CURSOR(MOUSE_CURSOR_POINTING_HAND);
+                            timeline_selected = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+                            if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+timeline_jump:
+                                played_perc    = ((f32)(mouse.x - total_rect.x))/(f32)total_rect.width;
+                                cur_music_time = AIL_LERP(played_perc, 0, cur_music_len);
+                                send_new_song(comm_cmds, (u32)cur_music_time);
+                                timeline_selected = false;
                             }
                         }
-                        volume_hovered |= volume_icon_hovered;
-
-                        DrawRectangleRounded(volume_slider, 5.0f, 5, RL_GRAY);
-                        DrawRectangleRounded(volume_slider_filled, 5.0f, 5, RL_RED);
-                        DrawCircle(volume_slider.x + volume/MAX_VOLUME*volume_slider.width, volume_slider.y + volume_slider.height/2, volume_circ_radius, RL_RED);
-                    }
-                    any_icon_hovered |= volume_hovered;
-
-                    if (any_icon_hovered) {
-                        timeline_selected = false;
-                        timeline_hovered  = false;
-                    }
-
-                    f32 x_circle;
-                    if (timeline_selected) {
-                        SET_CURSOR(MOUSE_CURSOR_POINTING_HAND);
-                        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-                            x_circle = mouse.x;
-                        } else if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-                            goto timeline_jump;
-                        }
-                    } else if (timeline_hovered) {
-                        SET_CURSOR(MOUSE_CURSOR_POINTING_HAND);
-                        timeline_selected = IsMouseButtonDown(MOUSE_BUTTON_LEFT);
-                        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-timeline_jump:
-                            played_perc    = ((f32)(mouse.x - total_rect.x))/(f32)total_rect.width;
-                            cur_music_time = AIL_LERP(played_perc, 0, cur_music_len);
-                            send_new_song(comm_cmds, (u32)cur_music_time);
+                        if (!timeline_selected) {
+                            x_circle = AIL_LERP(played_perc, play_bounds.x, play_bounds.x + play_bounds.width);
                             timeline_selected = false;
                         }
+
+                        RL_Rectangle played_rect = total_rect;
+                        played_rect.width   = x_circle - play_bounds.x;
+                        played_rect.y      -= 2.0f;
+                        played_rect.height += 4.0f;
+
+                        DrawRectangleRounded(total_rect,  5.0f, 5, RL_GRAY);
+                        DrawRectangleRounded(played_rect, 5.0f, 5, RL_RED);
+                        DrawCircle(x_circle, played_rect.y + played_rect.height/2, play_circ_radius, RL_RED);
+
+                        if (!paused) cur_music_time += speed * RL_GetFrameTime() * 1000.0f;
                     }
-                    if (!timeline_selected) {
-                        x_circle = AIL_LERP(played_perc, play_bounds.x, play_bounds.x + play_bounds.width);
-                        timeline_selected = false;
-                    }
-
-                    RL_Rectangle played_rect = total_rect;
-                    played_rect.width   = x_circle - play_bounds.x;
-                    played_rect.y      -= 2.0f;
-                    played_rect.height += 4.0f;
-
-                    DrawRectangleRounded(total_rect,  5.0f, 5, RL_GRAY);
-                    DrawRectangleRounded(played_rect, 5.0f, 5, RL_RED);
-                    DrawCircle(x_circle, played_rect.y + played_rect.height/2, play_circ_radius, RL_RED);
-
-                    if (!paused) cur_music_time += speed * RL_GetFrameTime() * 1000.0f;
                 }
                 // Otherwise if Arduino is not connected, show text reminding user to connect
                 else if (!comm_is_connected) {
@@ -661,7 +665,7 @@ timeline_jump:
             } break;
 
             case UI_VIEW_PARSING_SONG: {
-                draw_loading_anim(win_width, win_height, view_changed);
+                draw_loading_anim((RL_Rectangle){0, 0, win_width, win_height}, view_changed);
                 if (file_parsed) {
                     song.name = song_name;
                     ail_da_push(&library, song);
@@ -685,19 +689,19 @@ timeline_jump:
     return 0;
 }
 
-void draw_loading_anim(u32 win_width, u32 win_height, bool start_new)
+void draw_loading_anim(RL_Rectangle bounds, bool start_new)
 {
-    static       u32 loading_anim_idx             = 0;
-    static const u32 loading_anim_len             = FPS;
-    static const u8  loading_anim_circle_count    = 12;
-    static const f32 loading_anim_circle_radius   = 20;
-    static const f32 loading_anim_circle_distance = 100;
+    static u32 loading_anim_idx             = 0;
+    const  f32 loading_anim_circle_radius   = AIL_CLAMP(AIL_MIN(bounds.width, bounds.height)/30, 5, 30);
+    const  u8  loading_anim_circle_count    = AIL_CLAMP(AIL_MIN(bounds.width, bounds.height)/20, 6, 16);
+    const  f32 loading_anim_circle_distance = AIL_CLAMP(AIL_MIN(bounds.width, bounds.height)/6,  5, 200);
+    const  u32 loading_anim_len             = 7*loading_anim_circle_count;
     if (AIL_UNLIKELY(start_new)) loading_anim_idx = 0;
     u8 loading_cur_song = (u8)(((f32) loading_anim_circle_count * loading_anim_idx) / (f32)loading_anim_len);
     for (u8 i = 0; i < loading_anim_circle_count; i++) {
         f32 i_perc = i / (f32)loading_anim_circle_count;
-        u32 x      = win_width/2  + loading_anim_circle_distance*cosf(2*PI*i_perc);
-        u32 y      = win_height/2 + loading_anim_circle_distance*sinf(2*PI*i_perc);
+        u32 x      = bounds.x + bounds.width/2  + loading_anim_circle_distance*cosf(2*PI*i_perc);
+        u32 y      = bounds.y + bounds.height/2 + loading_anim_circle_distance*sinf(2*PI*i_perc);
         f32 delta  = (i + loading_anim_circle_count - loading_cur_song) / (f32)loading_anim_circle_count;
         RL_Color col = {0xff, 0xff, 0xff, 0xff*delta};
         DrawCircle(x, y, loading_anim_circle_radius, col);
