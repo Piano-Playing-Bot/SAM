@@ -2,18 +2,6 @@
 // Includes //
 //////////////
 
-// @TODO: Send PIDI in stream cmds to the arduino
-// @TODO: When first finding the Arduino Port, the loudness and speed levels should be set, as they might still be stored in modified form from a pevious session
-// @TODO: Implement jumping on the timeline by sending new PIDI message with index 0
-
-#define AIL_ALLOC_IMPL
-#define AIL_ALL_IMPL
-#define AIL_MD_IMPL
-#define AIL_GUI_IMPL
-#define AIL_FS_IMPL
-#define AIL_BUF_IMPL
-#define AIL_SV_IMPL
-
 #include "../deps/raylib/src/raylib.h"  // For immediate UI framework
 static RL_MouseCursor cursor;
 #define SET_CURSOR(c) cursor = (c)
@@ -25,24 +13,11 @@ static RL_MouseCursor cursor;
 #define MAX_VOLUME 2.0f
 #define MIN_VOLUME 0.0f
 
-#include "ail_fs.h"
-#include "common.h"
-#include <stdbool.h> // For boolean definitions
-#include <string.h>  // For memcpy
-#include <pthread.h> // For threads and mutexes
-#include <unistd.h>  // For sleep @Cleanup
-#include "math.h"    // For sinf, cosf
+#include "header.h"
+#include <math.h>   // For sinf, cosf
 #include "midi.c"
 #include "comm.c"
-// #define AIL_ALLOC_PRINT_MEM
-#include "ail_alloc.h"
-#include "ail.h"
-// #define AIL_MD_MEM_DEBUG
-// #define AIL_MD_MEM_PRINT
-#include "ail_md.h"
-#include "ail_gui.h"
-#include "ail_buf.h"
-#include "ail_sv.h"
+
 
 #define PRIMARY_COLOR          (RL_Color) { 0xff, 0x8c, 0x00, 0xff }
 #define PRIMARY_BORDER_COLOR   (RL_Color) { 0x33, 0x33, 0x33, 0xff }
@@ -92,7 +67,6 @@ static bool file_parsed;
 static char *err_msg;
 
 // These variables are all accessed by main and load_library
-// @TODO: Make library into a Trie to simplify search
 AIL_DA(Song) library = { .allocator = &ail_default_allocator };
 bool library_ready = false;
 

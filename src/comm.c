@@ -1,28 +1,12 @@
-#define AIL_ALL_IMPL
-#define AIL_FS_IMPL
-#define AIL_BUF_IMPL
-#define AIL_RING_IMPL
-#define AIL_TIME_IMPL
-#define AIL_ALLOC_IMPL
-#include "ail.h"
-#include "ail_fs.h"
-#include "ail_buf.h"
-#include "ail_ring.h"
-#include "ail_time.h"
-#include "ail_alloc.h"
-#include "common.h"
-#include <pthread.h>
-#include <stdlib.h>
-#include <stdio.h>
+#include "header.h"
 #include <windows.h>
 #include <xpsprint.h>
-
-// @TODO: Add Error Handling for trying to send a message again if no SUCC came back for it?
-// Maybe instead of responding with SUCC, the Arduino should just respond with the type of the message it successfully received?
 
 #define NEXT_MSGS_COUNT 4
 #define SEND_MSG_MAX_RETRIES 8
 #define MAX_BYTES_TO_SEND_AT_ONCE 16
+#define READING_CHUNK_SIZE 8
+#define MAX_CLIENT_MSG_SIZE (4 + 1 + 3*12*(1<<4) + 2 + 4*(1<<16))
 
 typedef struct NextMsgRing {
     ClientMsgType data[NEXT_MSGS_COUNT];
@@ -78,7 +62,7 @@ ServerMsgType check_for_msg(void);
 void *comm_thread_main(void *args)
 {
     AIL_UNUSED(args);
-    comm_played_keys = ail_da_new_with_cap(PlayedKeySPPP, KEYS_AMOUNT);
+    comm_played_keys = ail_da_new_with_cap(PlayedKeySPPP, PIANO_KEY_AMOUNT*(1<<4));
     AIL_Allocator arena = ail_alloc_arena_new(2*AIL_ALLOC_PAGE_SIZE, &ail_alloc_pager);
     AIL_ASSERT(arena.data != NULL); // @TODO: Show error message if something goes wrong
     while (true) {
@@ -328,7 +312,6 @@ bool comm_setup_port(void) {
 // Read all incoming data from the port into the Ring Buffer
 void listen_to_port(void)
 {
-    #define READING_CHUNK_SIZE 8
 AIL_STATIC_ASSERT(READING_CHUNK_SIZE < AIL_RING_SIZE/2);
     u8 msg[READING_CHUNK_SIZE] = {0};
     DWORD read;
@@ -375,8 +358,6 @@ ServerMsgType wait_for_reply(void)
     }
     return SMSG_NONE;
 }
-
-#define MAX_CLIENT_MSG_SIZE (4 + 1 + 3*12*(1<<4) + 2 + 4*(1<<16))
 
 bool send_msg(ClientMsg msg)
 {

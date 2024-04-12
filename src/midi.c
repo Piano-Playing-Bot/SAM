@@ -1,14 +1,6 @@
-#define AIL_ALL_IMPL
-#define AIL_FS_IMPL
-#define AIL_BUF_IMPL
-#include "common.h"
-#include <stdbool.h> // For boolean definitions
-#include <stdlib.h>  // For malloc, memcpy, free
-#include "ail.h"
-#include "ail_fs.h"
-#include "ail_buf.h"
+#include "header.h"
 
-// @TODO: Use custom allocators instead of malloc here
+// @TODO: Use custom allocators instead of calloc/free here
 
 typedef AIL_DA(PidiCmd) PidiCmdList;
 AIL_DA_INIT(PidiCmdList);
