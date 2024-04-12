@@ -282,6 +282,19 @@ void set_speed(f32 speed)
     while (pthread_mutex_unlock(&comm_speed_mutex) != 0) {}
 }
 
+void close_comm(void)
+{
+    if (comm_port) {
+        send_msg((ClientMsg) {
+            .type = CMSG_CONTINUE,
+            .data = { .b = false },
+        });
+        CloseHandle(comm_port);
+        comm_port = NULL;
+        comm_is_connected = false;
+    }
+}
+
 bool comm_setup_port(void) {
     COMMTIMEOUTS timeouts = {
         .ReadIntervalTimeout         = 50,

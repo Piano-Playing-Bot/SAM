@@ -683,8 +683,8 @@ timeline_jump:
         ail_gui_allocator.free_all(ail_gui_allocator.data);
     }
 
-    if (comm_port) CloseHandle(comm_port);
     RL_CloseWindow();
+    close_comm();
     return 0;
 }
 
