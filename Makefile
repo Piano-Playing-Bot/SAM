@@ -14,38 +14,32 @@ CFLAGS += -ggdb
 export RAYLIB_BUILD_MODE=DEBUG
 endif
 
-INCLUDES  = -I$(COMMON_PATH) -I./deps/raylib/src -I$(COMMON_PATH)ail
+INCLUDES  = -I./src -I$(COMMON_PATH) -I./deps/raylib/src -I$(COMMON_PATH)ail
 LIBS      = -L./bin -lraylib -lopengl32 -lgdi32 -lwinmm -lpthread -lwinspool
 CFLAGS   += $(INCLUDES) $(LIBS)
 
 
-.PHONY: clean main
+.PHONY: clean main pidi_test midi_test print_bin pidi_maker show_pidi
 
-all: main commTest pidiTest midiTest test print_bin pidi_maker showPidi
+all: main pidi_test midi_test print_bin pidi_maker show_pidi
 
 main: bin/libraylib.a src/main.c src/midi.c src/comm.c
 	$(CC) -o bin/main src/main.c $(CFLAGS)
 
-commTest: src/commTest.c
-	$(CC) -o commTest src/commTest.c $(CFLAGS)
+pidi_test: utils/pidi_test.c
+	$(CC) -o pidi_test utils/pidi_test.c $(CFLAGS)
 
-pidiTest: src/pidiTest.c
-	$(CC) -o pidiTest src/pidiTest.c $(CFLAGS)
+midi_test: utils/midi_test.c
+	$(CC) -o midi_test utils/midi_test.c $(CFLAGS)
 
-midiTest: src/midiTest.c
-	$(CC) -o midiTest src/midiTest.c $(CFLAGS)
+print_bin: utils/print_bin.c
+	$(CC) -o print_bin utils/print_bin.c $(CFLAGS)
 
-test: src/test.c
-	$(CC) -o test src/test.c $(CFLAGS)
+pidi_maker: utils/pidi_maker.c
+	$(CC) -o pidi_maker utils/pidi_maker.c $(CFLAGS)
 
-print_bin: src/print_bin.c
-	$(CC) -o print_bin src/print_bin.c $(CFLAGS)
-
-pidi_maker: src/pidi_maker.c
-	$(CC) -o pidi_maker src/pidi_maker.c $(CFLAGS)
-
-showPidi: src/showPidi.c
-	$(CC) -o showPidi src/showPidi.c $(CFLAGS)
+show_pidi: utils/show_pidi.c
+	$(CC) -o show_pidi utils/show_pidi.c $(CFLAGS)
 
 export PLATFORM=PLATFORM_DESKTOP
 export RAYLIB_LIBTYPE=STATIC
