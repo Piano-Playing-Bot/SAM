@@ -196,7 +196,7 @@ int main(void)
     };
 
     RL_Rectangle header_bounds, content_bounds, play_bounds, icon_bounds;
-    u32 play_timeline_height, play_timeline_width, icon_size, header_y_pad, header_x_pad, play_bounds_pad, play_inner_pad;
+    u32 play_timeline_height, icon_size, header_y_pad, header_x_pad, play_bounds_pad, play_inner_pad;
     f32 conn_circ_radius, play_circ_radius, volume_slider_width, volume_slider_height, volume_circ_radius, speed_max_size, icon_pad;
     AIL_Gui_Label centered_label = {
         .text         = ail_da_new_empty(char),
@@ -252,7 +252,6 @@ int main(void)
             icon_size = size_max*3/2;
             icon_pad  = play_inner_pad;
             play_timeline_height = 10;
-            play_timeline_width  = play_bounds.width - icon_size - icon_pad;
             play_circ_radius     = AIL_CLAMP(play_bounds_pad, 1.3f*play_timeline_height, 2*play_timeline_height);
             i32 play_bounds_min_height = AIL_MAX(2*size_default, play_inner_pad + play_timeline_height + icon_size + 2*play_bounds_pad);
             play_bounds.width  = header_bounds.width;
@@ -649,8 +648,6 @@ timeline_jump:
                 }
             } break;
         }
-
-        RL_DrawFPS(10, 10); // @Cleanup
 
         SetMouseCursor(cursor);
         RL_EndDrawing();
