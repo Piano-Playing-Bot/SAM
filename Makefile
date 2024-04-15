@@ -19,7 +19,7 @@ LIBS      = -L./bin -lraylib -lopengl32 -lgdi32 -lwinmm -lpthread -lwinspool
 CFLAGS   += $(INCLUDES) $(LIBS)
 
 
-.PHONY: clean main pidi_test midi_test print_bin pidi_maker show_pidi
+.PHONY: clean main pidi_test midi_test print_bin pidi_maker show_pidi latency_test
 
 all: main pidi_test midi_test print_bin pidi_maker show_pidi
 
@@ -40,6 +40,9 @@ pidi_maker: utils/pidi_maker.c
 
 show_pidi: utils/show_pidi.c
 	$(CC) -o show_pidi utils/show_pidi.c $(CFLAGS)
+
+latency_test: utils/latency_test.c
+	$(CC) -o latency_test utils/latency_test.c $(CFLAGS)
 
 export PLATFORM=PLATFORM_DESKTOP
 export RAYLIB_LIBTYPE=STATIC
